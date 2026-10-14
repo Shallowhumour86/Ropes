@@ -14,15 +14,17 @@ for kind in ('CONFIG', 'SCRIPTS', 'EXTENSIONS'):
 import bpy
 import addon_utils
 
-old = root / 'dist' / 'surface-ropes-0.1.0.zip'
-new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.2.1.zip')
+old_name = sys.argv[2] if len(sys.argv) > 2 else 'surface-ropes-0.1.0.zip'
+old = root / 'dist' / old_name
+new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.3.0.zip')
 assert bpy.ops.preferences.addon_install(filepath=str(old)) == {'FINISHED'}
 bpy.utils.refresh_script_paths()
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None
-assert module.bl_info['version'] == (0, 1, 0)
+expected_old = (0, 2, 1) if '0.2.1' in old_name else (0, 1, 0)
+assert module.bl_info['version'] == expected_old
 old_geometry = sys.modules['ropes.geometry']
-assert not hasattr(old_geometry, 'three_strands')
+assert hasattr(old_geometry, 'three_strands') == (expected_old >= (0, 2, 0))
 
 bpy.ops.mesh.primitive_grid_add(x_subdivisions=15, y_subdivisions=15, size=4)
 surface = bpy.context.object
@@ -33,7 +35,11 @@ rope = module.new_rope(bpy.context.scene, surface)
 for point in ((-1, 0, 0), (1, 0, 0)):
     rope.ropes_rope.anchors.add().position = point
 module.rebuild(bpy.context.scene, surface)
-settings.squish = .6
+if expected_old >= (0, 2, 0):
+    rope.ropes_rope.squish = .6
+else:
+    settings.squish = .6
+module.knot_at(bpy.context.scene, rope, 1.0)
 uid = rope.ropes_rope.uid
 
 # Blender's actual preferences installer disables, overwrites, reloads, and
@@ -41,7 +47,7 @@ uid = rope.ropes_rope.uid
 assert bpy.ops.preferences.addon_install(filepath=str(new), overwrite=True) == {'FINISHED'}
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None, 'Upgraded add-on failed to enable'
-assert module.bl_info['version'] >= (0, 2, 1)
+assert module.bl_info['version'] == (0, 3, 0)
 # The headless Python-module runner has no UI event loop to execute timers.
 assert module.migrate_after_enable() is None
 assert hasattr(sys.modules['ropes.geometry'], 'three_strands')
@@ -49,10 +55,11 @@ assert module.three_strands is sys.modules['ropes.geometry'].three_strands
 assert sys.modules['ropes.geometry'] is old_geometry
 assert rope.ropes_rope.uid == uid
 assert len(rope.ropes_rope.anchors) == 2
+assert len(rope.ropes_rope.knots) == 1
 assert abs(rope.ropes_rope.radius-.08) < 1e-6
 assert abs(rope.ropes_rope.squish-.6) < 1e-6
 module.rebuild(bpy.context.scene, surface)
 assert len([o for o in bpy.context.scene.objects if o.get('ropes_owner') == uid]) == 3
 addon_utils.disable('ropes', default_set=True)
 assert not hasattr(bpy.types.Scene, 'ropes_settings')
-print('IN_PROCESS_0_1_UPGRADE_PASSED', bpy.app.version_string)
+print('IN_PROCESS_UPGRADE_PASSED', expected_old, 'to', module.bl_info['version'], bpy.app.version_string)

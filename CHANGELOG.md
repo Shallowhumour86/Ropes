@@ -1,3 +1,18 @@
+# 0.3.0
+
+- Added visible waypoint markers and click-marker/click-surface relocation with
+  rope rebuilding, knot/crossing updates, and in-tool undo/redo. W toggles markers.
+- Compression now includes generated knot footprints, doubled runs, and folds.
+- Added compact overhand and figure-eight knot styles, legacy trefoil, per-rope
+  defaults, individual/junction overrides and knot size. Mathematical references
+  and the inspected MIT license are documented in KNOT_SOURCES.md.
+- Added one continuous doubled rope with paired surface runs, adjustable spacing,
+  a folded end at the first waypoint, and two free ends at the final waypoint.
+- Retained cached-module refresh, restricted-registration handling, and recovery
+  after failed installs. Verified upgrade paths from 0.1 and 0.2.1.
+- 25 headless Blender 4.4 integration checks plus installer/lifecycle checks pass;
+  complete desktop interaction still requires the manual acceptance checklist.
+
 # 0.2.1
 
 - Fixed the `cannot import name 'three_strands'` installation error when Blender

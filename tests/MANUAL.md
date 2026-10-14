@@ -1,9 +1,9 @@
-# Blender 4.4 viewport acceptance — version 0.2
+# Blender 4.4 viewport acceptance — version 0.3
 
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.2.1 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.3.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -34,3 +34,18 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   Extend an old rope, undo the extension in-tool and redo it.
 - Check sidebar invocation, orbit/zoom during drawing, empty clicks, disconnected
   islands, shared meshes and non-mesh selections. Errors should be informative.
+
+- Toggle Show Waypoints and enter Extend / Edit Ropes. Select a marker, click a
+  different surface location, and confirm only that anchor moves. Undo and redo.
+  Repeat with an endpoint and a middle waypoint. W toggles the markers; Esc/RMB
+  cancels a pending move. Confirm markers do not render.
+- Create a knot away from the main path on a dense surface. Increase squishiness;
+  confirm indentation follows the knot footprint. Toggle it off and verify that
+  only its additional imprint disappears.
+- Switch Compact Overhand / Figure Eight / Legacy Trefoil. Override one manual
+  knot and one junction knot independently. Verify other knots retain their style.
+- Enable Doubled Rope. Inspect two runs, the folded first endpoint, and two free
+  final ends. Adjust spacing, add a knot, move a waypoint, and inspect crossings.
+  Confirm compression follows both runs and the fold. Disable doubling again.
+- Save/reopen with marker visibility, doubled mode and knot overrides enabled.
+  Confirm those settings persist and remain editable.

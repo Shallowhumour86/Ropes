@@ -13,3 +13,4 @@ uv pip sync --python "$ropes_python" --require-hashes tests/requirements-blender
 "$ropes_python" tests/package_install.py
 "$ropes_python" tests/package_upgrade.py
 "$ropes_python" tests/restricted_registration.py
+"$ropes_python" tests/package_upgrade.py surface-ropes-0.3.0.zip surface-ropes-0.2.1.zip

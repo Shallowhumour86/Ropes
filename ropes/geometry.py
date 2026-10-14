@@ -269,14 +269,33 @@ def point_segment_distance(point, a, b):
     return (point-a-delta*t).length
 
 
-def knot_points(center, tangent, normal, radius):
-    """A closed trefoil knot: a visible geometric knot, not a physics constraint."""
+def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
+    """Procedural overhand/figure-eight centerlines; references in KNOT_SOURCES.md."""
     x = tangent.normalized()
     z = normal.normalized()
     y = z.cross(x).normalized()
     if y.length < .1:
         y = x.orthogonal().normalized()
     z = x.cross(y).normalized()
+    if kind != 'TREFOIL':
+        result = []
+        count = 180 if kind == 'OVERHAND' else 220
+        # Open the outer arc to provide separate entering/exiting leads. The
+        # standard trefoil/figure-eight parameterizations are cited in KNOT_SOURCES.
+        for i in range(count):
+            t = math.pi/6+(5*math.pi/3)*i/(count-1)
+            if kind == 'OVERHAND':
+                a = (2+math.cos(3*t))*math.cos(2*t)
+                b = (2+math.cos(3*t))*math.sin(2*t)
+                height = 2.3+1.25*math.sin(3*t)
+                px, py = -b*.9, a*.85
+            else:
+                a = (2+math.cos(2*t))*math.cos(3*t)
+                b = (2+math.cos(2*t))*math.sin(3*t)
+                height = 2.45+1.35*math.sin(4*t)
+                px, py = -b*.9, a*.75
+            result.append(center+radius*(px*x+py*y+height*z))
+        return result
     result = []
     for i in range(128):
         t = 2*math.pi*i/128
@@ -284,3 +303,46 @@ def knot_points(center, tangent, normal, radius):
         result.append(center + radius*((2+math.cos(3*t))*math.cos(2*t)*x +
                       (2+math.cos(3*t))*math.sin(2*t)*y + (1.6+math.sin(3*t))*z))
     return result
+
+
+def doubled_path(surface, points, stations, radius, spacing=2.2):
+    """One continuous folded rope: two runs, joined by a bight at the start."""
+    lanes = [[], []]
+    last_side = None
+    half = radius*spacing/2
+    for i, point in enumerate(points):
+        nearest, normal, _ = surface.project(point)
+        tangent = points[min(i+1, len(points)-1)]-points[max(0, i-1)]
+        if tangent.length < 1e-8:
+            tangent = Vector((1, 0, 0))
+        tangent.normalize()
+        side = normal.cross(tangent)
+        if side.length < 1e-5:
+            side = last_side or tangent.orthogonal()
+        side.normalize()
+        if last_side is not None and side.dot(last_side) < 0:
+            side.negate()
+        last_side = side.copy()
+        height = max(radius*1.05, (point-nearest).dot(normal))
+        for lane, sign in zip(lanes, (-1, 1)):
+            projected, n, _ = surface.project(nearest+side*(half*sign))
+            lane.append(projected+n*height)
+    center = (lanes[0][0]+lanes[1][0])/2
+    side = (lanes[0][0]-lanes[1][0])/2
+    tangent = points[1]-points[0]
+    if tangent.length < 1e-8:
+        tangent = Vector((1, 0, 0))
+    tangent.normalize()
+    bight = [center+side*math.cos(math.pi*i/24)-tangent*half*math.sin(math.pi*i/24)
+             for i in range(1, 24)]
+    result = list(reversed(lanes[0]))+bight+lanes[1]
+    mapping = list(reversed(stations))+[stations[0]]*len(bight)+list(stations)
+    return result, mapping
+
+
+def bezier_join(a, a_tangent, b, b_tangent, count=16):
+    distance = (b-a).length*.3
+    c = a+a_tangent.normalized()*distance
+    d = b-b_tangent.normalized()*distance
+    return [(1-t)**3*a+3*(1-t)**2*t*c+3*(1-t)*t*t*d+t**3*b
+            for t in (i/count for i in range(1, count))]
