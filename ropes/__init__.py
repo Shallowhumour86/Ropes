@@ -1,13 +1,14 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 2, 0),
+    'version': (0, 2, 1),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
     'category': 'Object',
 }
 
+import importlib
 import json
 import math
 import uuid
@@ -20,6 +21,13 @@ from bpy.props import (BoolProperty, CollectionProperty, FloatProperty,
 from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 from bpy_extras import view3d_utils
+
+# Blender reloads a legacy add-on's entry module during an in-place install,
+# but can retain its old child modules. Geometry is pure code with no registered
+# Blender state, so it is safe to refresh before importing this version's helpers.
+from . import geometry as _geometry
+importlib.invalidate_caches()
+importlib.reload(_geometry)
 
 from .geometry import (Surface, cumulative, crossings, knot_points,
                        point_segment_distance, sample_at, resample, three_strands, strand_tube)
@@ -965,19 +973,63 @@ CLASSES = (ROPES_PG_Anchor, ROPES_PG_Knot, ROPES_PG_Rope, ROPES_PG_Junction,
            ROPES_OT_SwapCrossing, ROPES_PT_Panel)
 
 
-def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-    bpy.types.Object.ropes_rope = PointerProperty(type=ROPES_PG_Rope)
-    bpy.types.Scene.ropes_settings = PointerProperty(type=ROPES_PG_Settings)
-    bpy.app.handlers.load_post.append(migrate_on_load)
+
+def migrate_after_enable():
+    # Enabling an add-on runs under Blender's restricted data/context wrapper.
+    # A timer runs after that wrapper has been released, on the main thread.
+    if not hasattr(bpy.data, 'scenes'):
+        return .1
     migrate_on_load(None)
+    return None
+
+
+def registered_classes():
+    result = []
+    for cls in CLASSES:
+        base = cls.__bases__[0]
+        if issubclass(cls, bpy.types.Operator):
+            prefix, suffix = cls.bl_idname.split('.')
+            identifier = prefix.upper()+'_OT_'+suffix
+        else:
+            identifier = getattr(cls, 'bl_idname', None) or cls.__name__
+        found = base.bl_rna_get_subclass_py(identifier, None)
+        if found and found.__module__ == __name__:
+            result.append(found)
+    return result
+
+
+def clear_registration():
+    # A failed 0.2 registration can leave classes and pointers behind even though
+    # Blender has removed the module from its enabled-add-on list. Clean up only
+    # this add-on's RNA registrations before retrying, preserving scene ID data.
+    if bpy.app.timers.is_registered(migrate_after_enable):
+        bpy.app.timers.unregister(migrate_after_enable)
+    for handler in list(bpy.app.handlers.load_post):
+        if handler.__module__ == __name__ and handler.__name__ == 'migrate_on_load':
+            bpy.app.handlers.load_post.remove(handler)
+    classes = registered_classes()
+    if classes:
+        if hasattr(bpy.types.Scene, 'ropes_settings'):
+            del bpy.types.Scene.ropes_settings
+        if hasattr(bpy.types.Object, 'ropes_rope'):
+            del bpy.types.Object.ropes_rope
+        for cls in reversed(classes):
+            bpy.utils.unregister_class(cls)
+
+
+def register():
+    clear_registration()
+    try:
+        for cls in CLASSES:
+            bpy.utils.register_class(cls)
+        bpy.types.Object.ropes_rope = PointerProperty(type=ROPES_PG_Rope)
+        bpy.types.Scene.ropes_settings = PointerProperty(type=ROPES_PG_Settings)
+        bpy.app.handlers.load_post.append(migrate_on_load)
+        bpy.app.timers.register(migrate_after_enable, first_interval=0.0)
+    except Exception:
+        clear_registration()
+        raise
 
 
 def unregister():
-    if migrate_on_load in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(migrate_on_load)
-    del bpy.types.Scene.ropes_settings
-    del bpy.types.Object.ropes_rope
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)
+    clear_registration()

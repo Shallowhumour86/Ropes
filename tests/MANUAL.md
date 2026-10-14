@@ -3,7 +3,8 @@
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Disable 0.1, install the 0.2 ZIP, restart Blender and enable Surface Ropes.
+- Install the 0.2.1 ZIP over an enabled 0.1 add-on without restarting Blender.
+  Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
   values in independent controls. Rebuild to generate three-strand geometry.

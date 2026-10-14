@@ -1,3 +1,13 @@
+# 0.2.1
+
+- Fixed the `cannot import name 'three_strands'` installation error when Blender
+  retains version 0.1's geometry module during an in-place upgrade.
+- Deferred existing-scene initialization until Blender releases the restricted
+  enable context, fixing `_RestrictData` errors during registration.
+- Clean up partial registrations left by failed installs so a retry can succeed.
+- Added a regression check that installs and enables 0.1, then installs 0.2.1
+  without restarting Blender. It also checks existing rope data migration.
+
 # 0.2.0
 
 - Added independent per-rope width, tightness, squishiness, indentation width,
