@@ -1,0 +1,386 @@
+"""Run with blender --background --factory-startup --python-exit-code 1 --python tests/blender_integration.py."""
+import json
+import math
+from pathlib import Path
+import sys
+import unittest
+from types import SimpleNamespace
+
+import bpy
+from bpy_extras import view3d_utils
+import bmesh
+from mathutils import Vector
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import ropes
+from ropes.geometry import Surface, closest_segments, cumulative, crossings
+
+print("BLENDER_TEST_VERSION", bpy.app.version_string)
+ropes.register()
+
+
+class RopesIntegration(unittest.TestCase):
+    def setUp(self):
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.delete(use_global=False)
+        bpy.context.scene.ropes_settings.junctions.clear()
+        bpy.ops.mesh.primitive_grid_add(x_subdivisions=25, y_subdivisions=25, size=4)
+        self.target = bpy.context.object
+        self.settings = bpy.context.scene.ropes_settings
+        self.settings.target = self.target
+        self.settings.radius = .035
+        self.settings.subdivisions = 1
+        self.settings.squish = 0
+        self.settings.tension = .5
+        self.settings.smoothing = 1
+        self.settings.falloff = 4
+
+    def rope(self, *anchors):
+        obj = ropes.new_rope(bpy.context.scene, self.target)
+        for point in anchors:
+            obj.ropes_rope.anchors.add().position = point
+        ropes.rebuild(bpy.context.scene, self.target)
+        return obj
+
+    def test_surface_route_and_extension(self):
+        r = self.rope((-1, -.6, 0), (1, -.6, 0))
+        p = ropes.rest_path(r)
+        self.assertGreater(len(p), 2)
+        self.assertLess((p[0]-Vector((-1, -.6, 0))).length, 1e-4)
+        self.assertTrue(all(abs(v.z) < 1e-5 for v in p))
+        r.ropes_rope.anchors.add().position = (1, 1, 0)
+        ropes.rebuild(bpy.context.scene, self.target)
+        self.assertLess((ropes.rest_path(r)[-1]-Vector((1, 1, 0))).length, 1e-4)
+        self.assertEqual(len(r.ropes_rope.anchors), 3)
+
+    def test_crossing_under_default_swap_and_knot_toggle(self):
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        self.assertEqual(len(self.settings.junctions), 1)
+        j = self.settings.junctions[0]
+        self.assertTrue(j.over_a)
+        self.assertEqual(j.rope_a, a)
+        self.assertEqual(j.rope_b, b)
+        pa, _ = ropes.sample_at(ropes.visible_path(a), cumulative(ropes.rest_path(a)), j.distance_a)
+        pb, _ = ropes.sample_at(ropes.visible_path(b), cumulative(ropes.rest_path(b)), j.distance_b)
+        self.assertGreater(pa.z, pb.z+self.settings.radius)
+        self.assertEqual(bpy.ops.ropes.swap_crossing(), {'FINISHED'})
+        j = self.settings.junctions[0]
+        self.assertFalse(j.over_a)
+        self.assertGreater(max(p.z for p in ropes.visible_path(b)), max(p.z for p in ropes.visible_path(a)))
+        station = j.distance_b
+        ropes.knot_at(bpy.context.scene, b, station)
+        self.assertTrue(self.settings.junctions[0].is_knot)
+        self.assertGreater(len(ropes.visible_path(b)), len(ropes.rest_path(b)))
+        ropes.knot_at(bpy.context.scene, b, station)
+        self.assertFalse(self.settings.junctions[0].is_knot)
+        self.assertEqual(len(ropes.visible_path(b)), len(ropes.rest_path(b)))
+
+    def test_manual_knots_and_extension_preserve_station(self):
+        r = self.rope((-1.5, 0, 0), (1, 0, 0))
+        ropes.knot_at(bpy.context.scene, r, .65)
+        self.assertEqual(len(r.ropes_rope.knots), 1)
+        r.ropes_rope.anchors.add().position = (1, 1, 0)
+        ropes.rebuild(bpy.context.scene, self.target)
+        self.assertAlmostEqual(r.ropes_rope.knots[0].distance, .65, places=5)
+        self.assertGreater(len(ropes.visible_path(r)), len(ropes.rest_path(r)))
+        self.assertFalse(r.data.splines[0].use_cyclic_u)
+        ropes.knot_at(bpy.context.scene, r, .65)
+        self.assertEqual(len(r.ropes_rope.knots), 0)
+
+    def test_self_crossing(self):
+        r = self.rope((-1.3, -1.3, 0), (1.3, 1.3, 0), (-1.3, 1.3, 0), (1.3, -1.3, 0))
+        j = [j for j in self.settings.junctions if j.rope_a == r and j.rope_b == r]
+        self.assertEqual(len(j), 1)
+        self.assertTrue(j[0].over_a)
+        station = j[0].distance_b
+        ropes.knot_at(bpy.context.scene, r, station)
+        self.assertTrue(self.settings.junctions[0].is_knot)
+
+    def test_compression_reversible_and_removing_last_rope(self):
+        r = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        before = [v.co.copy() for v in self.target.data.vertices]
+        r.ropes_rope.squish = .8
+        key = self.target.data.shape_keys.key_blocks[self.target['ropes_compression_key']]
+        self.assertEqual(key.value, 1)
+        self.assertTrue(any(p.co.z < -.005 for p in key.data))
+        self.assertEqual([tuple(v.co) for v in self.target.data.vertices], [tuple(v) for v in before])
+        self.assertAlmostEqual(min(p.z for p in ropes.visible_path(r)), self.settings.radius*1.05-self.settings.radius*.8, delta=.002)
+        r.ropes_rope.squish = 0
+        self.assertEqual(key.value, 0)
+        r.ropes_rope.squish = .8
+        self.settings.active_rope = r
+        self.assertEqual(bpy.ops.ropes.remove(), {'FINISHED'})
+        self.assertEqual(key.value, 0)
+        self.assertEqual(len(ropes.rope_objects(bpy.context.scene, self.target)), 0)
+
+    def test_rename_preserves_order_and_crossing_state(self):
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        a.name, b.name = 'Z first rope', 'A later rope'
+        self.settings.junctions[0].over_a = False
+        self.settings.junctions[0].is_knot = True
+        ropes.rebuild(bpy.context.scene, self.target)
+        self.assertEqual(self.settings.junctions[0].rope_a, a)
+        self.assertFalse(self.settings.junctions[0].over_a)
+        self.assertTrue(self.settings.junctions[0].is_knot)
+
+    def test_existing_shape_keys_preserved(self):
+        self.target.shape_key_add(name='Basis')
+        existing = self.target.shape_key_add(name='User sculpt')
+        existing.data[0].co.z = .3
+        existing.value = .4
+        before = [tuple(p.co) for p in existing.data]
+        r = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        r.ropes_rope.squish = .7
+        self.assertEqual([tuple(p.co) for p in existing.data], before)
+        self.assertAlmostEqual(existing.value, .4)
+        self.assertNotEqual(self.target['ropes_compression_key'], existing.name)
+
+    def test_shared_mesh_compression_reports_error(self):
+        r = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        other = bpy.data.objects.new('Shared user', self.target.data)
+        bpy.context.scene.collection.objects.link(other)
+        r.ropes_rope.squish = .5
+        self.assertIn('single-user', self.settings.message)
+        self.assertIsNone(self.target.data.shape_keys)
+
+    def test_projected_mouse_clicks_from_sidebar_context(self):
+        area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
+        region = next(r for r in area.regions if r.type == 'WINDOW')
+        ui = next(r for r in area.regions if r.type == 'UI')
+        rv3d = area.spaces.active.region_3d
+        errors = []
+        operator = SimpleNamespace(surface=Surface(self.target, 1), target=self.target,
+                                   area=area, region=region, rv3d=rv3d, rope=None,
+                                   undo_history=[], redo_history=[],
+                                   report=lambda level, message: errors.append(message))
+        operator.finish = lambda context: ropes.ROPES_OT_Draw.finish(operator, context)
+        # Panel buttons invoke from the sidebar, whose region_data is None.
+        context = SimpleNamespace(scene=bpy.context.scene, area=area, region=ui,
+                                  region_data=None)
+
+        def click(point, kind='LEFTMOUSE'):
+            xy = view3d_utils.location_3d_to_region_2d(region, rv3d, Vector(point))
+            event = SimpleNamespace(type=kind, value='PRESS', alt=False,
+                                    mouse_x=xy.x+region.x, mouse_y=xy.y+region.y,
+                                    mouse_region_x=-1, mouse_region_y=-1)
+            return ropes.ROPES_OT_Draw.modal(operator, context, event)
+
+        click((-1, 0, 0))
+        click((1, 0, 0))
+        self.assertEqual(len(operator.rope.ropes_rope.anchors), 2)
+        self.assertFalse(errors, errors)
+        self.assertLess((Vector(operator.rope.ropes_rope.anchors[0].position)-Vector((-1, 0, 0))).length, .01)  # Within one screen pixel
+        path = ropes.visible_path(operator.rope)
+        middle = path[len(path)//2]
+        click(middle, 'RIGHTMOUSE')
+        self.assertEqual(len(operator.rope.ropes_rope.knots), 1)
+        stations = json.loads(operator.rope['ropes_stations'])
+        knot_s = operator.rope.ropes_rope.knots[0].distance
+        knot_index = next(i for i, s in enumerate(stations) if abs(s-knot_s) < 1e-5)
+        click(ropes.visible_path(operator.rope)[knot_index], 'RIGHTMOUSE')
+        self.assertEqual(len(operator.rope.ropes_rope.knots), 0)
+        self.assertEqual(ropes.ROPES_OT_Draw.modal(operator, context,
+                         SimpleNamespace(type='N', value='PRESS')), {'RUNNING_MODAL'})
+        self.assertIsNone(operator.rope)
+        self.assertEqual(ropes.ROPES_OT_Draw.modal(operator, context,
+                         SimpleNamespace(type='ESC', value='PRESS')), {'FINISHED'})
+
+    def test_independent_settings_and_live_width(self):
+        a = self.rope((-1.5, -.8, 0), (1.5, -.8, 0))
+        b = self.rope((-1.5, .8, 0), (1.5, .8, 0))
+        before_b = [tuple(p) for p in ropes.visible_path(b)]
+        props_b = {name: getattr(b.ropes_rope, name) for name in ropes.COPY_SETTINGS}
+        a.ropes_rope.squish = .8
+        a.ropes_rope.tension = .9
+        a.ropes_rope.falloff = 2
+        a.ropes_rope.radius = .06
+        self.assertFalse(self.settings.message, self.settings.message)
+        self.assertEqual({name: getattr(b.ropes_rope, name) for name in ropes.COPY_SETTINGS}, props_b)
+        self.assertEqual([tuple(p) for p in ropes.visible_path(b)], before_b)
+        helpers = [o for o in bpy.context.scene.objects if o.get('ropes_owner') == a.ropes_rope.uid]
+        self.assertEqual(len(helpers), 3)
+        self.assertTrue(all(abs(o['ropes_tube_radius']-.06*.46) < 1e-6 for o in helpers))
+        key = self.target.data.shape_keys.key_blocks[self.target['ropes_compression_key']]
+        near_a = min(key.data, key=lambda p: abs(p.co.x)+abs(p.co.y+.8))
+        near_b = min(key.data, key=lambda p: abs(p.co.x)+abs(p.co.y-.8))
+        self.assertLess(near_a.co.z, -.02)
+        self.assertAlmostEqual(near_b.co.z, 0, places=6)
+        a.ropes_rope.squish = 0
+        self.assertEqual(key.value, 0)
+        # Defaults affect future ropes only.
+        self.settings.radius = .1
+        self.settings.squish = .3
+        self.assertAlmostEqual(a.ropes_rope.radius, .06)
+        self.assertAlmostEqual(b.ropes_rope.squish, 0)
+        c = self.rope((-1, 1.6, 0), (1, 1.6, 0))
+        self.assertAlmostEqual(c.ropes_rope.radius, .1)
+        self.assertAlmostEqual(c.ropes_rope.squish, .3)
+
+    def test_width_update_preserves_strand_selection_and_unequal_crossing(self):
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        helper = next(o for o in bpy.context.scene.objects if o.get('ropes_owner') == b.ropes_rope.uid)
+        bpy.context.view_layer.objects.active = helper
+        b.ropes_rope.radius = .1
+        a.ropes_rope.radius = .015
+        self.assertEqual(bpy.context.active_object, helper)
+        self.assertEqual(bpy.ops.ropes.use_selected_rope(), {'FINISHED'})
+        self.assertEqual(self.settings.active_rope, b)
+        j = self.settings.junctions[0]
+        pa, _ = ropes.sample_at(ropes.visible_path(a), cumulative(ropes.rest_path(a)), j.distance_a)
+        pb, _ = ropes.sample_at(ropes.visible_path(b), cumulative(ropes.rest_path(b)), j.distance_b)
+        self.assertGreater(pa.z-pb.z, a.ropes_rope.radius+b.ropes_rope.radius)
+
+    def test_smoothing_zero_to_exact_straight_line(self):
+        bpy.ops.mesh.primitive_grid_add(x_subdivisions=5, y_subdivisions=8, size=4)
+        grid = bpy.context.object
+        self.target = grid
+        self.settings.target = grid
+        self.settings.subdivisions = 0
+        self.settings.smoothing = 0
+        start, end = Vector((-1.7, -1.25, 0)), Vector((1.5, 1.4, 0))
+        r = self.rope(start, end)
+        raw = ropes.rest_path(r)
+        direct_length = (end-start).length
+        self.assertGreater(cumulative(raw)[-1], direct_length*1.01)
+        r.ropes_rope.smoothing = .5
+        middle_length = cumulative(ropes.rest_path(r))[-1]
+        r.ropes_rope.smoothing = 1
+        smooth = ropes.rest_path(r)
+        self.assertAlmostEqual(cumulative(smooth)[-1], direct_length, places=5)
+        self.assertLess(middle_length, cumulative(raw)[-1])
+        self.assertGreater(middle_length, direct_length)
+        for p in smooth:
+            self.assertLess(ropes.point_segment_distance(p, start, end), 1e-5)
+        self.assertTrue(all(p.z >= r.ropes_rope.radius for p in ropes.visible_path(r)))
+
+    def test_smoothed_curved_rope_clearance(self):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=16, radius=2)
+        self.target = bpy.context.object
+        self.settings.target = self.target
+        r = self.rope((2, 0, 0), (0, 0, 2))
+        surface = Surface(self.target, 0)
+        for a, b in zip(ropes.visible_path(r), ropes.visible_path(r)[1:]):
+            for p in (a, a.lerp(b, .5)):
+                nearest, normal, _ = surface.project(p)
+                self.assertGreater((p-nearest).dot(normal), r.ropes_rope.radius*.9)
+
+    def test_undo_redo_multiple_placements_and_new_rope(self):
+        scene = bpy.context.scene
+        first = self.rope((-1.3, 0, 0), (0, 0, 0))
+        uid = first.ropes_rope.uid
+        state = ropes.capture_state(scene, self.target, first)
+        first.ropes_rope.anchors.add().position = (1.3, 0, 0)
+        ropes.rebuild(scene, self.target)
+        area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
+        operator = SimpleNamespace(target=self.target, rope=first, area=area,
+                                   undo_history=[state], redo_history=[], report=lambda *args: None)
+        context = SimpleNamespace(scene=scene)
+        undo = SimpleNamespace(type='Z', value='PRESS', ctrl=True, shift=False)
+        redo = SimpleNamespace(type='Z', value='PRESS', ctrl=True, shift=True)
+        ropes.ROPES_OT_Draw.modal(operator, context, undo)
+        self.assertEqual(operator.rope.ropes_rope.uid, uid)
+        self.assertEqual(len(operator.rope.ropes_rope.anchors), 2)
+        ropes.ROPES_OT_Draw.modal(operator, context, redo)
+        self.assertEqual(len(operator.rope.ropes_rope.anchors), 3)
+        before_new = ropes.capture_state(scene, self.target, None)
+        operator.rope = self.rope((0, -.9, 0), (0, .9, 0))
+        operator.undo_history.append(before_new)
+        ropes.ROPES_OT_Draw.modal(operator, context, SimpleNamespace(type='BACK_SPACE', value='PRESS'))
+        self.assertEqual(len(ropes.rope_objects(scene, self.target)), 1)
+        self.assertIsNone(operator.rope)
+        ropes.ROPES_OT_Draw.modal(operator, context, redo)
+        self.assertEqual(len(ropes.rope_objects(scene, self.target)), 2)
+        self.assertEqual(len(scene.ropes_settings.junctions), 1)
+
+    def test_remove_last_point_operator_and_strand_material(self):
+        r = self.rope((-1.5, 0, 0), (0, 0, 0), (1.5, .8, 0))
+        self.assertEqual(bpy.ops.ropes.remove_last_point(), {'FINISHED'})
+        self.assertEqual(len(r.ropes_rope.anchors), 2)
+        self.assertLess((ropes.rest_path(r)[-1]-Vector((0, 0, 0))).length, 1e-5)
+        helpers = [o for o in bpy.context.scene.objects if o.get('ropes_owner') == r.ropes_rope.uid]
+        self.assertEqual(len(helpers), 3)
+        self.assertTrue(all(o.data.materials[0].use_nodes for o in helpers))
+        self.assertTrue(any(n.type == 'BUMP' for n in helpers[0].data.materials[0].node_tree.nodes))
+        vertices = helpers[0].data.vertices
+        strand = [helpers[0].matrix_world @ (sum((v.co for v in vertices[i:i+10]), Vector())/10)
+                  for i in range(0, len(vertices), 10)]
+        self.assertIsNotNone(helpers[0].data.uv_layers.get('FiberUV'))
+        self.assertGreater(max(p.uv.x for p in helpers[0].data.uv_layers.active.data), 1)
+        self.assertGreater(cumulative(strand)[-1], cumulative(ropes.visible_path(r))[-1]*1.01)
+        uid = r.ropes_rope.uid
+        self.assertEqual(bpy.ops.ropes.remove(), {'FINISHED'})
+        self.assertFalse(any(o.get('ropes_owner') == uid for o in bpy.context.scene.objects))
+
+    def test_legacy_settings_migration(self):
+        r = self.rope((-1, 0, 0), (1, 0, 0))
+        self.settings.radius = .08
+        self.settings.squish = .6
+        self.settings.tension = .7
+        with ropes.quiet_updates():
+            r.ropes_rope.initialized = False
+        ropes.migrate_on_load(None)
+        self.assertTrue(r.ropes_rope.initialized)
+        self.assertAlmostEqual(r.ropes_rope.radius, .08)
+        self.assertAlmostEqual(r.ropes_rope.squish, .6)
+        self.assertAlmostEqual(r.ropes_rope.tension, .7)
+        self.assertEqual(r.ropes_rope.smoothing, 0)
+        r.ropes_rope.squish = .2
+        ropes.migrate_on_load(None)
+        self.assertAlmostEqual(r.ropes_rope.squish, .2)
+
+    def test_disconnected_surface_rejected(self):
+        bm = bmesh.new()
+        for offset in (0, 5):
+            verts = [bm.verts.new((offset+x, y, 0)) for x, y in [(0, 0), (1, 0), (0, 1)]]
+            bm.faces.new(verts)
+        mesh = bpy.data.meshes.new('Islands')
+        bm.to_mesh(mesh)
+        bm.free()
+        obj = bpy.data.objects.new('Islands', mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        with self.assertRaisesRegex(ValueError, 'disconnected'):
+            Surface(obj, 0).route((.1, .1, 0), (5.1, .1, 0))
+
+    def test_curved_surface_stays_outside_sphere(self):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=16, radius=2)
+        sphere = bpy.context.object
+        surface = Surface(sphere, 1)
+        path = surface.route((2, 0, 0), (0, 0, 2))
+        self.assertGreater(len(path), 5)
+        self.assertTrue(all(v.length > 1.96 for v in path), min(v.length for v in path))
+        self.assertTrue(all(surface.project(v)[0].__sub__(v).length < 1e-4 for v in path))
+
+    def test_transformed_surface_and_save_reload(self):
+        self.target.location = (3, 2, 1)
+        self.target.rotation_euler.z = .4
+        bpy.context.view_layer.update()
+        r = self.rope((-1, 0, 0), (1, 0, 0))
+        expected = self.target.matrix_world @ Vector((-1, 0, 0))
+        self.assertLess((ropes.rest_path(r)[0]-expected).length, 1e-4)
+        self.assertAlmostEqual(ropes.visible_path(r)[0].z, 1+self.settings.radius*1.05, places=4)
+        r.ropes_rope.radius = .063
+        r.ropes_rope.smoothing = .75
+        r.ropes_rope.squish = .3
+        uid = r.ropes_rope.uid
+        output = '/tmp/ropes-integration.blend'
+        bpy.ops.wm.save_as_mainfile(filepath=output)
+        bpy.ops.wm.open_mainfile(filepath=output)
+        r = next(o for o in bpy.context.scene.objects if o.ropes_rope.uid == uid)
+        self.assertEqual(len(r.ropes_rope.anchors), 2)
+        self.assertAlmostEqual(r.ropes_rope.radius, .063)
+        self.assertAlmostEqual(r.ropes_rope.smoothing, .75)
+        self.assertAlmostEqual(r.ropes_rope.squish, .3)
+        ropes.rebuild(bpy.context.scene, r.ropes_rope.target)
+        self.assertLess((ropes.rest_path(r)[0]-expected).length, 1e-4)
+
+
+suite = unittest.defaultTestLoader.loadTestsFromTestCase(RopesIntegration)
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+ropes.unregister()
+if not result.wasSuccessful():
+    raise RuntimeError('Blender integration tests failed')
+print(f'ROPES_TESTS_PASSED={result.testsRun}')
