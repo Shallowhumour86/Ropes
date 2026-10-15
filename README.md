@@ -1,4 +1,4 @@
-# Surface Ropes 0.4.0 — Blender 4.4
+# Surface Ropes 0.5.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.4.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.4.0.zip).
+[Download version 0.5.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.5.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,21 +23,32 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.4.0
+## New in 0.5.0
 
-- Tighter doubled compact overhand knots at minimum Knot Size.
-- Junction knots now weave both crossing ropes into a shared shape.
-- **Waypoint Mode** lets you plan a rope before generating its geometry.
-- **Spanning** waypoints bridge gaps without indenting the surface.
+- Continuous contact normals, relaxed offset paths and stable doubled-run frames
+  reduce valley kinks and bunching. Path Smoothing still controls path relaxation.
+- Spanning endpoints use the same rope-radius clearance as surface routes, rather
+  than lifting them by the full doubled bundle width. Transitions are relaxed
+  together. Indentation eases to zero where a surface section meets a span,
+  avoiding an abrupt height step when compression is enabled. Waypoint markers
+  sit at their surface contact locations.
+- Draft placement updates only draft markers and undo metadata. Existing rope
+  routing, meshes, crossing detection and deformation wait until Generate Rope.
+- **Run Spacing** now starts at **1**: two nearly touching ropes, with centerlines
+  2.02 radii apart. Existing saved spacing is converted to preserve separation.
+- A smaller doubled-overhand core and preserved 3D lane offsets tighten the
+  minimum knot further.
 
-[Knot comparison](dist/surface-ropes-0.4.0-knots.png) ·
-[Both-rope junction preview](dist/surface-ropes-0.4.0-junction.png)
+[Knot comparison](dist/surface-ropes-0.5.0-knots.png) ·
+[Valley and span-transition preview](dist/surface-ropes-0.5.0-valleys.png)
 
 ## Plan with waypoints
 
 Enable **Waypoint Mode**, then **Draw New Rope**. Place your points and press
 **Enter** to finish planning. Click **Generate Rope** when ready. Draft markers
-remain visible, and can be moved before generation. No rope geometry or surface
+remain visible at the clicked surface contacts, and can be moved before generation.
+Placement only updates markers and undo metadata; routing, strand generation,
+crossings and compression are deferred until Generate Rope. No rope geometry or surface
 compression is created until you generate the rope.
 
 Choose **Normal** or **Spanning** for the next point in the sidebar, or press **T**
@@ -47,7 +58,8 @@ Select a waypoint in the active rope's list to change its type later.
 Only a pair of adjacent Spanning waypoints creates a free span. Normal/Spanning
 and Spanning/Normal pairs follow the surface as usual. Free spans use a direct
 line when clear, otherwise try a collision-checked detour around the target mesh.
-They account for rope thickness, including doubled runs, and contribute no
+Each generated run is checked for rope-thickness clearance, including doubled
+runs. Spans contribute no
 indentation. The route is an approximate shortest clear path, not a physical
 rope simulation. If no safe route is found, reduce the width or move the points.
 Collision checks use the target object's base mesh, not other scene objects.
@@ -116,7 +128,9 @@ and curved leads instead of the original large, closed-looking trefoil tangle.
 Enable **Doubled Rope** on an existing or new rope. Both runs follow the same
 waypoints with an offset, and a continuous folded end joins them at the first
 waypoint. Each run retains the active rope's radius and three-strand construction.
-**Run Spacing** uses multiples of that radius; the default is 2.2 radii. Knot
+**Run Spacing** is a separation multiplier, with a default and minimum of **1**.
+At 1 the centers are 2.02 radii apart, leaving only a small clearance between the
+runs. At 2 the separation doubles. Knot
 geometry expands to accommodate the pair. Right-clicking either run edits the
 same logical knot station. This is a paired visual rope, not a simulated tying
 procedure, hitch, or physical constraint. Keep waypoints away from narrow mesh
@@ -188,10 +202,10 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 32 integration checks cover routing, flat/curved smoothing, independent
+The 36 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1 and 0.3.0
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0 and 0.4.0
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.

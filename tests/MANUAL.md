@@ -1,9 +1,9 @@
-# Blender 4.4 viewport acceptance — version 0.4
+# Blender 4.4 viewport acceptance — version 0.5
 
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.4.0 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.5.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -60,3 +60,13 @@ underlying geometry and projected mouse math, rather than all UI behavior.
 - Inspect a minimum-size doubled overhand. At a junction knot, follow both ropes
   through the shared interwoven shape; neither should continue straight beneath.
   Swap, toggle off/on, change style, and repeat at a self-crossing.
+
+- Draw along a sharp concave crease, then across a curved waist/valley. Inspect
+  single and doubled runs in Solid and Rendered modes for bunching, backtracking
+  and unexpected junctions. Repeat with squishiness enabled.
+- Inspect Normal/Spanning transitions on flat and curved geometry. Markers should
+  sit on the surface, and rope centerlines should have only thickness clearance.
+- Add draft points with many generated ropes already present: existing strand
+  meshes must not regenerate on each click. Repeat moving points and undo/redo.
+- Set Run Spacing to 1: both runs should be nearly touching. Open a 0.4 scene
+  with custom spacing and verify conversion preserves the physical separation.

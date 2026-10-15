@@ -4,18 +4,19 @@ import math
 
 import bmesh
 from mathutils import Vector
+from mathutils.geometry import barycentric_transform
 from mathutils.bvhtree import BVHTree
 
 
 class Surface:
     """World-space routing graph on a subdivided copy of the undeformed mesh."""
 
-    def __init__(self, obj, subdivisions=2):
+    def __init__(self, obj, subdivisions=2, routing=True):
         self.obj = obj
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         bmesh.ops.triangulate(bm, faces=list(bm.faces))
-        if len(bm.faces)*(subdivisions+1)**2 > 500000:
+        if routing and len(bm.faces)*(subdivisions+1)**2 > 500000:
             bm.free()
             raise ValueError('Routing graph is too large. Reduce Routing Detail or simplify the mesh.')
         if subdivisions:
@@ -28,8 +29,10 @@ class Surface:
         self.closed = all(len(e.link_faces) == 2 for e in bm.edges)
         self.vertices = [obj.matrix_world @ v.co for v in bm.verts]
         self.faces = [tuple(v.index for v in f.verts) for f in bm.faces]
+        normal_matrix=obj.matrix_world.to_3x3().inverted_safe().transposed()
+        self.normals=[(normal_matrix @ v.normal).normalized() for v in bm.verts]
         self.adjacency = [[] for _ in self.vertices]
-        for edge in bm.edges:
+        for edge in (bm.edges if routing else []):
             a, b = (v.index for v in edge.verts)
             length = (self.vertices[a] - self.vertices[b]).length
             self.adjacency[a].append((b, length))
@@ -44,6 +47,29 @@ class Surface:
         if co is None:
             raise ValueError('Could not find a surface near this point.')
         return co, normal, face
+
+    def normal_at(self, point):
+        co,normal,face=self.project(point)
+        ids=self.faces[face]
+        direction=barycentric_transform(co,*(self.vertices[i] for i in ids),
+                                        *(self.normals[i] for i in ids))
+        if direction.length<1e-8 or direction.dot(normal)<.05:
+            direction=normal
+        return direction.normalized()
+
+    def contact(self, point, radius):
+        """Continuous offset direction with enough room on both sides of a crease."""
+        co,normal,face=self.project(point)
+        direction=self.normal_at(co)
+        height=radius*1.05
+        for _ in range(12):
+            candidate=co+direction*height
+            near,n,_=self.project(candidate)
+            gap=(candidate-near).length
+            if gap>=radius*1.045 and (candidate-near).dot(n)>=0:
+                return candidate
+            height+=max(radius*.02,radius*1.05-gap)/max(direction.dot(n),.1)
+        return co+normal*radius*1.05
 
     def route(self, start, end, smoothing=1.0):
         start, _, sf = self.project(start)
@@ -136,12 +162,15 @@ def three_strands(points, radius, pitch=12.0):
         if last_x is None:
             x = tangent.orthogonal().normalized()
         else:
-            x = last_x-tangent*last_x.dot(tangent)
+            rotation = last_tangent.rotation_difference(tangent)
+            x = rotation @ last_x
+            x -= tangent*x.dot(tangent)
             if x.length < 1e-5:
                 x = tangent.orthogonal()
             x.normalize()
         y = tangent.cross(x).normalized()
         last_x = x
+        last_tangent = tangent.copy()
         angle = 2*math.pi*distance/(radius*pitch)
         for strand in range(3):
             phase = angle+strand*2*math.pi/3
@@ -306,31 +335,53 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
     return result
 
 
-def doubled_path(surface, points, stations, radius, spacing=2.2, free=None):
+def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None):
     """One continuous folded rope: two runs, joined by a bight at the start."""
     lanes = [[], []]
     last_side = None
-    half = radius*spacing/2
+    half = radius*1.01*spacing
     for i, point in enumerate(points):
         nearest, normal, _ = surface.project(point)
+        normal = normals[i] if normals is not None else surface.normal_at(nearest)
         tangent = points[min(i+1, len(points)-1)]-points[max(0, i-1)]
         if tangent.length < 1e-8:
             tangent = Vector((1, 0, 0))
         tangent.normalize()
-        side = normal.cross(tangent)
-        if side.length < 1e-5:
-            side = last_side or tangent.orthogonal()
+        if last_side is None:
+            side = normal.cross(tangent)
+            if side.length < 1e-5:
+                side = tangent.orthogonal()
+        else:
+            side = last_tangent.rotation_difference(tangent) @ last_side
+            side -= tangent*side.dot(tangent)
+        if last_side is not None and (point-nearest).length < radius*1.6 and not (free and free[i]):
+            guide=normal.cross(tangent)
+            if guide.length>1e-5:
+                guide.normalize()
+                if guide.dot(side)<0:
+                    guide.negate()
+                side=side.lerp(guide,.2)
         side.normalize()
-        if last_side is not None and side.dot(last_side) < 0:
-            side.negate()
-        last_side = side.copy()
-        height = max(radius*1.05, (point-nearest).dot(normal))
+        last_side, last_tangent = side.copy(), tangent.copy()
+        # Keep the pair rigid while clearing the object: pushing each lane
+        # independently toward a valley wall squeezed them into one another.
+        center=point.copy()
+        floating=free is not None and free[i]
+        support=normal
+        for _ in range(12):
+            lift=0
+            for sign in (-1,1):
+                candidate=center+side*(half*sign)
+                co,n,_=surface.project(candidate)
+                signed=(candidate-co).dot(n)
+                blocked=((candidate-co).length<radius*1.05 or (surface.closed and signed<0)) if floating else signed<radius*1.05
+                if blocked:
+                    lift=max(lift,(radius*1.05-signed)/max(.1,support.dot(n)))
+            if lift<radius*1e-6:
+                break
+            center+=support*lift
         for lane, sign in zip(lanes, (-1, 1)):
-            if free is not None and free[i]:
-                lane.append(point+side*(half*sign))
-            else:
-                projected, n, _ = surface.project(nearest+side*(half*sign))
-                lane.append(projected+n*height)
+            lane.append(center+side*(half*sign))
     center = (lanes[0][0]+lanes[1][0])/2
     side = (lanes[0][0]-lanes[1][0])/2
     tangent = points[1]-points[0]
@@ -381,8 +432,8 @@ def spanning_route(surface, start, end, radius):
     """Shortest verified line first; otherwise shorten a safe outside route."""
     start, sn, _ = surface.project(start)
     end, en, _ = surface.project(end)
-    a, b = start+sn*radius*1.35, end+en*radius*1.35
-    safe_radius = radius*1.08
+    a, b = surface.contact(start,radius), surface.contact(end,radius)
+    safe_radius = radius*1.01
     if segment_clear(surface, a, b, safe_radius):
         return uniform_samples([a, b], 100)
     candidates = []
@@ -460,4 +511,32 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
         phi=winding*t+phase
         result.append(center+(major+minor*math.cos(phi))*(math.cos(t)*x+math.sin(t)*y)+
                       (height+minor*math.sin(phi))*z)
+    return result
+
+
+def fair_contact_path(surface, points, radius, amount=1, pinned=()):
+    """Relax an offset path in free space, pushing out only on contact.
+
+    Clear chords can bridge small valleys. Convex obstacles retain contact.
+    This retains index/station correspondence and fixes the two end contacts.
+    """
+    if amount <= 0 or len(points)<3:
+        return points
+    result=[p.copy() for p in points]
+    fixed=set(pinned)|{0,len(points)-1}
+    for stride in (6,3,1):
+        for _ in range(10):
+            updated=[]
+            for i,p in enumerate(result):
+                if i in fixed:
+                    updated.append(p)
+                    continue
+                a,b=result[max(0,i-stride)],result[min(len(result)-1,i+stride)]
+                candidate=p.lerp((a+b)/2,.65*amount)
+                co,n,_=surface.project(candidate)
+                signed=(candidate-co).dot(n)
+                if signed<radius*1.05:
+                    candidate=candidate+n*(radius*1.05-signed)
+                updated.append(candidate)
+            result=updated
     return result

@@ -1,3 +1,17 @@
+# 0.5.0
+
+- Stabilized contact normals and offset paths through concave valleys.
+- Transported doubled-run frames along the actual 3D rope instead of independently
+  projecting raised sections back onto the object.
+- Matched span endpoint height to normal rope clearance and relaxed transitions.
+- Eased indentation to zero at surface/span joins to prevent compression steps.
+- Placed markers on their stored surface contacts.
+- Removed routing, rendering, crossing and compression work from draft clicks,
+  moves and draft undo/redo; updates affect only draft metadata and markers.
+- Normalized Run Spacing to a minimum/default of 1 (nearly touching), migrating
+  previous settings to preserve physical separation.
+- Reduced minimum doubled compact-overhand core size further.
+
 # 0.4.0
 
 - Added draft waypoint placement and explicit Generate Rope.

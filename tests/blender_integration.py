@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import bpy
 from bpy_extras import view3d_utils
@@ -40,7 +41,7 @@ class RopesIntegration(unittest.TestCase):
         self.settings.knot_type = 'OVERHAND'
         self.settings.knot_size = 1
         self.settings.doubled = False
-        self.settings.double_spacing = 2.2
+        self.settings.double_spacing = 1
         self.settings.falloff = 4
 
     def rope(self, *anchors):
@@ -432,7 +433,7 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.doubled = True
         path = ropes.visible_path(r)
         self.assertGreater(cumulative(path)[-1], original*2)
-        separation = r.ropes_rope.radius*r.ropes_rope.double_spacing
+        separation = r.ropes_rope.radius*2.02*r.ropes_rope.double_spacing
         self.assertAlmostEqual((path[0]-path[-1]).length, separation, places=5)
         self.assertAlmostEqual(path[0].x, 1, places=5)
         self.assertAlmostEqual(path[-1].x, 1, places=5)
@@ -446,7 +447,7 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.falloff = 1
         r.ropes_rope.squish = .8
         field = ropes.PressureField(bpy.context.scene, self.target)
-        half = r.ropes_rope.radius*2
+        half = r.ropes_rope.radius*4.04
         self.assertGreater(field.value(Vector((0, half, 0))), field.value(Vector((0, 0, 0)))*3)
         self.assertGreater(field.value(Vector((0, -half, 0))), field.value(Vector((0, 0, 0)))*3)
         ropes.knot_at(bpy.context.scene, r, 1)
@@ -603,6 +604,110 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.knot_size=1.5
         larger=ropes.visible_path(r)
         self.assertGreater(max(p.y for p in larger)-min(p.y for p in larger),width)
+
+    def test_valley_centerline_stays_straight_without_false_crossings(self):
+        # Dense channel with a hard concave crease and alternating triangles.
+        verts=[(-1.2+i*.06, -.4+j*.1, abs(-.4+j*.1)) for i in range(41) for j in range(9)]
+        faces=[(i*9+j,(i+1)*9+j,(i+1)*9+j+1,i*9+j+1) for i in range(40) for j in range(8)]
+        mesh=bpy.data.meshes.new('Creased valley')
+        mesh.from_pydata(verts,[],faces)
+        self.target=bpy.data.objects.new('Creased valley',mesh)
+        bpy.context.scene.collection.objects.link(self.target)
+        self.settings.target=self.target
+        r=self.rope((-1,0,0),(1,0,0))
+        points=ropes.visible_path(r)
+        self.assertEqual(len(self.settings.junctions),0)
+        self.assertLess(max(abs(p.y) for p in points),r.ropes_rope.radius*.15)
+        self.assertLess(cumulative(points)[-1],2.01)
+        surface=Surface(self.target,0)
+        self.assertTrue(all((p-surface.project(p)[0]).length>=r.ropes_rope.radius for p in points))
+        r.ropes_rope.doubled=True
+        self.assertFalse(self.settings.message,self.settings.message)
+        points=ropes.visible_path(r)
+        # Ignore the intentional folded end; both long runs remain straight.
+        tangents=[(b-a).normalized() for a,b in zip(points,points[1:]) if a.x>-.9 and b.x>-.9]
+        self.assertTrue(all(abs(t.x)>.99 for t in tangents))
+        # Contact resolution must not squeeze the two runs into the same groove.
+        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2.02,places=4)
+        for p in points:
+            if p.x>-.9:
+                self.assertGreaterEqual((p-surface.project(p)[0]).length,r.ropes_rope.radius*.99)
+        r.ropes_rope.squish=.7
+        self.assertFalse(self.settings.message,self.settings.message)
+        self.assertEqual(len(self.settings.junctions),0)
+        points=ropes.visible_path(r)
+        tangents=[(b-a).normalized() for a,b in zip(points,points[1:]) if abs(a.x)<.8 and abs(b.x)<.8]
+        self.assertTrue(all(abs(t.x)>.99 for t in tangents))
+
+    def test_span_contacts_and_mixed_transition_have_no_height_step(self):
+        r=self.rope((-1.5,0,0),(-.5,0,0),(.5,0,0),(1.5,0,0))
+        with ropes.quiet_updates():
+            r.ropes_rope.anchors[1].kind='SPANNING'
+            r.ropes_rope.anchors[2].kind='SPANNING'
+        ropes.rebuild(bpy.context.scene,self.target)
+        for doubled in (False,True):
+            r.ropes_rope.doubled=doubled
+            self.assertFalse(self.settings.message,self.settings.message)
+            points=ropes.visible_path(r)
+            self.assertLess(max(p.z for p in points)-min(p.z for p in points),1e-5)
+            self.assertAlmostEqual(points[-1].z,r.ropes_rope.radius*1.05,places=5)
+        r.ropes_rope.squish=1
+        r.ropes_rope.tension=1
+        points=ropes.visible_path(r)
+        turns=[(b-a).normalized().dot((c-b).normalized()) for a,b,c in zip(points,points[1:],points[2:]) if min(a.x,b.x,c.x)>-.8]
+        self.assertTrue(all(t>.95 for t in turns),min(turns))
+        # Inspection markers remain at contact locations when compression is off.
+        r.ropes_rope.squish=0
+        self.settings.show_waypoints=True
+        bpy.context.view_layer.update()
+        markers=[o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]
+        self.assertEqual(len(markers),4)
+        for marker in markers:
+            anchor=r.ropes_rope.anchors[marker['ropes_waypoint']]
+            self.assertLess((marker.matrix_world.translation-Vector(anchor.position)).length,1e-6)
+
+    def test_minimum_run_spacing_is_one_and_nearly_touching(self):
+        r=self.rope((-1,0,0),(1,0,0))
+        r.ropes_rope.doubled=True
+        r.ropes_rope.double_spacing=1
+        points=ropes.visible_path(r)
+        self.assertEqual(r.ropes_rope.double_spacing,1)
+        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2.02,places=5)
+        r.ropes_rope.double_spacing=0
+        self.assertEqual(r.ropes_rope.double_spacing,1)
+
+    def test_draft_clicks_moves_and_undo_skip_existing_geometry(self):
+        existing=self.rope((-1,-1,0),(1,-1,0))
+        before=[tuple(p) for p in ropes.visible_path(existing)]
+        self.settings.waypoint_mode=True
+        area=next(a for a in bpy.context.screen.areas if a.type=='VIEW_3D')
+        region=next(r for r in area.regions if r.type=='WINDOW')
+        rv3d=area.spaces.active.region_3d
+        operator=SimpleNamespace(target=self.target,rope=None,surface=Surface(self.target,0,routing=False),
+                                 area=area,region=region,rv3d=rv3d,moving_waypoint=None,
+                                 undo_history=[],redo_history=[],report=lambda *args: None)
+        context=SimpleNamespace(scene=bpy.context.scene,area=area)
+        def click(point):
+            bpy.context.view_layer.update()
+            xy=view3d_utils.location_3d_to_region_2d(region,rv3d,Vector(point))
+            event=SimpleNamespace(type='LEFTMOUSE',value='PRESS',alt=False,mouse_x=xy.x+region.x,mouse_y=xy.y+region.y)
+            ropes.ROPES_OT_Draw.modal(operator,context,event)
+        with patch.object(ropes,'rebuild',side_effect=AssertionError('Draft rebuilt ropes')), \
+             patch.object(ropes,'Surface',side_effect=AssertionError('Draft rebuilt surface')), \
+             patch.object(ropes,'PressureField',side_effect=AssertionError('Draft calculated compression')):
+            click((-1,0,0))
+            click((0,0,0))
+            click((1,0,0))
+            draft=operator.rope
+            self.assertEqual(len(draft.ropes_rope.anchors),3)
+            self.assertFalse(draft.data.splines)
+            ropes.ROPES_OT_Draw.modal(operator,context,SimpleNamespace(type='Z',value='PRESS',ctrl=True,shift=False))
+            self.assertEqual(len(operator.rope.ropes_rope.anchors),2)
+            ropes.ROPES_OT_Draw.modal(operator,context,SimpleNamespace(type='Z',value='PRESS',ctrl=True,shift=True))
+            self.assertEqual(len(operator.rope.ropes_rope.anchors),3)
+            ropes.move_waypoint(bpy.context.scene,operator.rope,1,Vector((0,.5,0)))
+            self.assertEqual(len([o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]),3)
+        self.assertEqual(before,[tuple(p) for p in ropes.visible_path(existing)])
 
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()
