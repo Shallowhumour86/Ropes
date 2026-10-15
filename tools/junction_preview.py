@@ -17,13 +17,13 @@ for row,doubled,label in [(1.3,False,'Single junction'),(-1.3,True,'Doubled junc
         owners.append(rope)
     bpy.ops.object.text_add(location=(-2.7,row+.8,.015))
     text=bpy.context.object
-    text.data.body=label
-    text.data.size=.18
+    text.data.body=label+' (green ties, red passes through)'
+    text.data.size=.13
 ropes.rebuild(scene,target)
 for junction in settings.junctions:
-    junction.is_knot=True
+    ropes.knot_at(scene,junction.rope_a,junction.distance_a)
 ropes.rebuild(scene,target,repath=False)
-for owner,color in zip(owners,[(.65,.28,.08,1),(.12,.42,.65,1)]*2):
+for owner,color in zip(owners,[(.12,.55,.12,1),(.65,.12,.2,1)]*2):
     for obj in scene.objects:
         if obj.get('ropes_owner')==owner.ropes_rope.uid and obj.type=='MESH':
             mat=obj.data.materials[0].copy()
@@ -34,5 +34,5 @@ for owner,color in zip(owners,[(.65,.28,.08,1),(.12,.42,.65,1)]*2):
                         element.color=tuple(c*strength for c in color[:3])+(1,)
             obj.data.materials[0]=mat
 ''' + source[end:]
-source=source.replace("surface-ropes-0.8.0-knots.png","surface-ropes-0.8.0-junction.png")
+source=source.replace("surface-ropes-0.9.0-knots.png","surface-ropes-0.9.0-junction.png")
 exec(compile(source, str(Path(__file__).with_name('knot_gallery.py')), 'exec'))

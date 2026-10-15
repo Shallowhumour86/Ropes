@@ -4,6 +4,13 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
+Version 0.9 junctions use a single open parameterized overhand/figure-eight
+around the passive rope's axis. The passive section remains straight through
+its eye; clearance approaches allow the active rope to pass beneath it.
+The eye clears the passive bundle, and depth separates the active over/under
+passes. Tests check the active knot determinant and winding around that axis,
+together with an unknotted passive section. This replaces 0.8's paired knots.
+
 Version 0.8 junction knots use two parallel components of the same open
 parameterized knot, with a transported cross-section frame. This replaces the
 independently cut torus-link loops from earlier versions. Both ropes traverse

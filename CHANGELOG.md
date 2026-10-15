@@ -1,3 +1,17 @@
+## 0.9.0
+
+- Junctions now use one tying rope around a passive rope's straight core,
+  replacing the paired overhand knots. The passive section has smooth clearance
+  approaches so the tying rope can pass below it without entering the mesh.
+- Right-click selection chooses the tying rope at distinct-rope junctions.
+  At self-crossings the upper section ties around the lower one. Ownership
+  survives repathing, state restore, draft edits and scene persistence; older
+  junctions default to their upper rope.
+- Added exact unfolded routing across adjacent planar faces, including the
+  precise fold point. Corrected crease-face normals to remove tangential drift.
+- Added off-centre/dense corner, diagonal unfolded route, active/passive
+  ownership, knot winding and straight-passive-core regression checks.
+
 ## 0.8.0
 
 - Replaced independently cut junction loops with paired open knot centerlines.

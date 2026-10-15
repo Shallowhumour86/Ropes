@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 8, 0),
+    'version': (0, 9, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
@@ -209,6 +209,8 @@ class ROPES_PG_Junction(bpy.types.PropertyGroup):
     is_knot: BoolProperty(default=False)
     kind: EnumProperty(name='Junction Knot Type', items=KNOT_CHOICES, default='INHERIT', update=knot_style_update)
     over_a: BoolProperty(default=True)
+    knot_a: BoolProperty(default=True)
+    knot_owner_set: BoolProperty(default=False)
     uid: StringProperty()
 
 
@@ -476,7 +478,7 @@ def rebuild(scene, target, repath=True):
     active_uid = (settings.junctions[settings.active_junction].uid
                   if settings.active_junction < len(settings.junctions) else None)
     old = [dict(a=j.rope_a, b=j.rope_b, p=Vector(j.position), knot=j.is_knot,
-                over_a=j.over_a, uid=j.uid, kind=j.kind)
+                over_a=j.over_a, uid=j.uid, kind=j.kind, knot_a=j.knot_a, knot_owner_set=j.knot_owner_set)
            for j in settings.junctions if j.rope_a and j.rope_a.ropes_rope.target == target]
     for index in reversed(range(len(settings.junctions))):
         j = settings.junctions[index]
@@ -508,6 +510,7 @@ def rebuild(scene, target, repath=True):
             with quiet_updates():
                 j.is_knot, j.uid, j.over_a = match['knot'], match['uid'], match['over_a']
                 j.kind = match['kind']
+                j.knot_a,j.knot_owner_set=match['knot_a'],match['knot_owner_set']
     if active_uid:
         for i, junction in enumerate(settings.junctions):
             if junction.uid == active_uid:
@@ -569,6 +572,20 @@ def baseline_path(rope,surface,path):
           if (i>0 and i-1<len(flags) and flags[i-1]) or (i<len(flags) and flags[i])}
     return fair_contact_path(surface,result,rope.ropes_rope.radius,rope.ropes_rope.smoothing,pins,references)
 
+def junction_active_a(junction):
+    if junction.rope_a==junction.rope_b:
+        return junction.over_a
+    return junction.knot_a if junction.knot_owner_set else junction.over_a
+
+
+def knot_extent(record,rope):
+    j=record['junction']
+    if j:
+        active=j.rope_a if junction_active_a(j) else j.rope_b
+        return max(envelope_radius(j.rope_a),envelope_radius(j.rope_b))*16*active.ropes_rope.knot_size
+    return rope.ropes_rope.radius*14
+
+
 def knot_records(scene, rope):
     props=rope.ropes_rope
     records=[dict(station=k.distance,kind=props.knot_type if k.kind=='INHERIT' else k.kind,junction=None,component=0)
@@ -576,12 +593,13 @@ def knot_records(scene, rope):
     for j in scene.ropes_settings.junctions:
         if not j.is_knot or not j.rope_a or not j.rope_b:
             continue
-        owner=j.rope_a if j.over_a else j.rope_b
+        active_a=junction_active_a(j)
+        owner=j.rope_a if active_a else j.rope_b
         kind=owner.ropes_rope.knot_type if j.kind=='INHERIT' else j.kind
         if j.rope_a==rope:
-            records.append(dict(station=j.distance_a,kind=kind,junction=j,component=0 if j.over_a else 1))
+            records.append(dict(station=j.distance_a,kind=kind,junction=j,component=0 if active_a else 1))
         if j.rope_b==rope:
-            records.append(dict(station=j.distance_b,kind=kind,junction=j,component=1 if j.over_a else 0))
+            records.append(dict(station=j.distance_b,kind=kind,junction=j,component=1 if active_a else 0))
     return sorted(records,key=lambda r:r['station'])
 
 
@@ -600,9 +618,11 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
         joint=record['junction']
         body_radius=compact*props.knot_size
         if joint:
-            body_radius=max(joint.rope_a.ropes_rope.radius,joint.rope_b.ropes_rope.radius)*1.4*max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size)
+            active=joint.rope_a if junction_active_a(joint) else joint.rope_b
+            passive=joint.rope_b if junction_active_a(joint) else joint.rope_a
+            body_radius=max(envelope_radius(active),envelope_radius(passive))*active.ropes_rope.knot_size*2
         station = max(0, min(lengths[-1], station))
-        lead_span=body_radius*(4.5 if props.doubled and kind=="OVERHAND" else 6)
+        lead_span=body_radius*(7 if joint else (4.5 if props.doubled and kind=="OVERHAND" else 6))
         low, high = max(0, station-lead_span), min(lengths[-1], station+lead_span)
         while i < len(lengths) and lengths[i] < low:
             result.append(rendered[i])
@@ -622,11 +642,14 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             nearest,normal,_=surface.project(world)
             floating=span_at(joint.rope_a,joint.distance_a) or span_at(joint.rope_b,joint.distance_b)
             center=world-normal*max(joint.rope_a.ropes_rope.radius,joint.rope_b.ropes_rope.radius)*1.05 if floating else nearest
-            frame=sample_at(rest_path(joint.rope_a),cumulative(rest_path(joint.rope_a)),joint.distance_a)[1]
-            loop=junction_points(center,frame,tangent,normal,joint.rope_a.ropes_rope.radius,
-                                 joint.rope_b.ropes_rope.radius,record['component'],kind,
-                                 max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size),
-                                 max(envelope_radius(joint.rope_a)/joint.rope_a.ropes_rope.radius,envelope_radius(joint.rope_b)/joint.rope_b.ropes_rope.radius))
+            passive_station=joint.distance_b if junction_active_a(joint) else joint.distance_a
+            passive_path=rest_path(passive)
+            frame=sample_at(passive_path,cumulative(passive_path),passive_station)[1]
+            active_station=joint.distance_a if junction_active_a(joint) else joint.distance_b
+            active_path=rest_path(active)
+            active_tangent=sample_at(active_path,cumulative(active_path),active_station)[1]
+            loop=junction_points(center,frame,active_tangent,normal,envelope_radius(active),
+                                 envelope_radius(passive),record['component'],kind,active.ropes_rope.knot_size)
         elif kind == 'TREFOIL':
             loop = knot_points(center+normal*radius, tangent, normal, body_radius*1.5, kind)
         else:
@@ -721,6 +744,8 @@ def display_path(scene, rope, surface, path):
         _, normal, _ = surface.project(point)
         lift = radius*1.05
         for j in junctions:
+            if j.is_knot:
+                continue
             distance = j.distance_a if j.over_a else j.distance_b
             under = j.rope_b if j.over_a else j.rope_a
             span = max(envelope_radius(rope), envelope_radius(under))*6
@@ -731,7 +756,7 @@ def display_path(scene, rope, surface, path):
                                       knot_records(scene, rope), rope)
     rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
     records=knot_records(scene,rope)
-    protected=[any(abs(station-record['station'])<radius*14 for record in records) for station in stations]
+    protected=[any(abs(station-record['station'])<knot_extent(record,rope) for record in records) for station in stations]
     rendered,fillet_refs=fillet_surface_waypoints(rope,surface,rendered,stations,protected)
     unrounded=rendered
     rendered=round_bends(surface,rendered,radius,radius*(3.5 if rope.ropes_rope.doubled else 2),protected)
@@ -753,7 +778,7 @@ def display_path(scene, rope, surface, path):
         rendered, stations = doubled_path(surface, rendered, stations, radius, rope.ropes_rope.double_spacing,
                                          [span_at(rope,s) for s in stations], normals,surface_refs,[r['station'] for r in records if r['junction']])
         rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
-        mask=[not span_at(rope,s) and not any(abs(s-r['station'])<radius*14 for r in records)
+        mask=[not span_at(rope,s) and not any(abs(s-r['station'])<knot_extent(r,rope) for r in records)
               and any(point_segment_distance(p,a,b)<radius*18 for a,b in surface.convex_edges)
               for p,s in zip(rendered,stations)]
         for _ in range(24):
@@ -780,7 +805,7 @@ def separate_knot_leads(scene,target,surface,displays):
     records={name:[r for r in knot_records(scene,owner) if r['junction']] for name,owner in owners.items()}
     if not any(records.values()):
         return
-    masks={name:[i not in (0,len(points)-1) and any(1e-6<abs(station-r['station'])<owners[name].ropes_rope.radius*14 for r in records[name])
+    masks={name:[i not in (0,len(points)-1) and any(1e-6<abs(station-r['station'])<knot_extent(r,owners[name]) for r in records[name])
                  for i,station in enumerate(stations)] for name,(points,stations) in displays.items()}
     for iteration in range(64):
         trees={}
@@ -1120,6 +1145,9 @@ def knot_at(scene, rope, distance):
             [abs(j.distance_a-distance)] if j.rope_b != rope else
             [abs(j.distance_b-distance)] if j.rope_a != rope else
             [abs(j.distance_a-distance), abs(j.distance_b-distance)]))
+        if not j.is_knot:
+            j.knot_a=rope==j.rope_a if j.rope_a!=j.rope_b else j.over_a
+            j.knot_owner_set=True
         j.is_knot = not j.is_knot
         settings.active_junction = list(settings.junctions).index(j)
     else:
@@ -1208,7 +1236,7 @@ def capture_state(scene, target, current_rope=None, drafts_only=False):
                            path=rope.get('ropes_path', '[]'), legs=rope.get('ropes_leg_bounds', '[]'), spans=rope.get('ropes_span_flags','[]'), centers=rope.get('ropes_span_centers','[]')))
     junctions = [dict(a=j.rope_a.ropes_rope.uid, b=j.rope_b.ropes_rope.uid,
                       position=tuple(j.position), sa=j.distance_a, sb=j.distance_b,
-                      knot=j.is_knot, over_a=j.over_a, uid=j.uid, kind=j.kind)
+                      knot=j.is_knot, over_a=j.over_a, uid=j.uid, kind=j.kind, knot_a=j.knot_a, knot_owner_set=j.knot_owner_set)
                  for j in scene.ropes_settings.junctions if
                  not drafts_only and j.rope_a and j.rope_b and j.rope_a.ropes_rope.target == target]
     active = scene.ropes_settings.active_rope
@@ -1272,6 +1300,7 @@ def restore_state(scene, target, state):
             j.distance_a, j.distance_b = record['sa'], record['sb']
             j.is_knot, j.over_a, j.uid = record['knot'], record['over_a'], record['uid']
             j.kind = record['kind']
+            j.knot_a,j.knot_owner_set=record.get('knot_a',j.over_a),record.get('knot_owner_set',False)
         settings.active_rope = next((r for r in rope_objects(scene,target) if r.ropes_rope.uid==state['active']),None)
     if state.get('drafts_only'):
         wanted={(r.ropes_rope.uid,i) for r in existing.values() for i in range(len(r.ropes_rope.anchors))}
@@ -1562,6 +1591,7 @@ def restore_draft_junctions(scene,rope,source):
             j.position=record['position']
             j.distance_a,j.distance_b=record['sa'],record['sb']
             j.is_knot,j.over_a,j.uid,j.kind=record['knot'],record['over_a'],record['uid'],record['kind']
+            j.knot_a,j.knot_owner_set=record.get('knot_a',j.over_a),record.get('knot_owner_set',False)
 
 
 class ROPES_OT_EditWaypoints(bpy.types.Operator):

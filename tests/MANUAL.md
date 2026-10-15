@@ -105,3 +105,19 @@ underlying geometry and projected mouse math, rather than all UI behavior.
 - Extend a rope that ends near an edge to the other side. The flat section
   should remain at contact height after extending and after Rebuild Ropes.
 - Check existing individual knots and curved surfaces retain their 0.7 behavior.
+
+## Active/passive junctions and direct edge routes (0.9.0)
+
+- Cross two ropes and right-click the default under rope. It should tie around
+  the other rope; that rope must pass straight through the knot's eye. Toggle
+  off, click the other rope, and check the roles reverse. Repeat with doubled
+  ropes, with unequal widths, and after changing the knot style.
+- At a self-crossing, either click location must knot the upper section around
+  the lower one. Swap Over / Under and check the roles reverse.
+- Rebuild, edit waypoints as a draft then generate, undo/redo, and save/reopen.
+  The chosen tying rope should persist. Older junction knots use the upper
+  rope until toggled off and recreated on the desired rope.
+- On a cube, place off-centre waypoints on adjacent faces at the same height.
+  At full smoothing the rope should cross the edge directly without a sideways
+  detour. Repeat diagonally, with dense points very close to/on the edge, and
+  with single/doubled ropes. Check from both sides and along the edge.

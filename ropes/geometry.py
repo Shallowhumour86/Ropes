@@ -33,6 +33,7 @@ class Surface:
         self.normals=[(normal_matrix @ v.normal).normalized() for v in bm.verts]
         self.sharp_edges=[]
         self.convex_edges=[]
+        self.convex_normals=[]
         for edge in (bm.edges if routing else []):
             if len(edge.link_faces)==2:
                 na,nb=[(normal_matrix @ face.normal).normalized() for face in edge.link_faces]
@@ -42,6 +43,7 @@ class Surface:
                     fa,fb=edge.link_faces
                     if fa.normal.dot(fb.calc_center_median()-fa.calc_center_median()) < -1e-7:
                         self.convex_edges.append(segment)
+                        self.convex_normals.append((na+nb).normalized())
         self.adjacency = [[] for _ in self.vertices]
         for edge in (bm.edges if routing else []):
             a, b = (v.index for v in edge.verts)
@@ -75,6 +77,13 @@ class Surface:
 
     def normal_at(self, point):
         co,normal,face=self.project(point)
+        # Flat crease faces must not inherit a tangential component from
+        # averaged corner-vertex normals. At the edge use its actual bisector.
+        planar=[(point_segment_distance(co,a,b),i) for i,(a,b) in enumerate(self.convex_edges)
+                if abs((co-a).dot(normal))<1e-6 and abs((b-a).dot(normal))<1e-6]
+        if planar:
+            gap,index=min(planar)
+            return self.convex_normals[index] if gap<1e-6 else normal
         ids=self.faces[face]
         direction=barycentric_transform(co,*(self.vertices[i] for i in ids),
                                         *(self.normals[i] for i in ids))
@@ -86,6 +95,13 @@ class Surface:
         """Continuous offset direction with enough room on both sides of a crease."""
         co,normal,face=self.project(point)
         direction=self.normal_at(co)
+        # A smoothed vertex normal on a flat face has an arbitrary component
+        # along the edge. It must not steer the route sideways around a crease.
+        nearby=[(point_segment_distance(co,a,b),i) for i,(a,b) in enumerate(self.convex_edges)]
+        if nearby:
+            gap,index=min(nearby)
+            if gap<radius*3:
+                direction=self.convex_normals[index] if gap<1e-6 else normal
         height=radius*1.05
         for _ in range(12):
             candidate=co+direction*height
@@ -101,6 +117,10 @@ class Surface:
         end, _, ef = self.project(end)
         if sf == ef:
             return uniform_samples([start, end], 100)
+        shortcut=self.unfolded_edge_route(start,end)
+        if smoothing>0 and shortcut is not None:
+            if smoothing>=1:
+                return edge_route_samples(shortcut)
         distances = [float('inf')] * len(self.vertices)
         parents = {}
         queue = []
@@ -133,7 +153,45 @@ class Surface:
             chain.append(self.vertices[last])
             last = parents[last]
         points = [start] + list(reversed(chain)) + [end]
+        if shortcut is not None and smoothing>0:
+            original=uniform_samples(points,100)
+            direct=edge_route_samples(shortcut,100)
+            return [self.project(a.lerp(b,smoothing))[0] for a,b in zip(original,direct)]
         return smooth_surface_path(self, points, smoothing)
+
+    def unfolded_edge_route(self,start,end):
+        """Exact shortest route across two flat faces sharing a hard edge."""
+        _,na,_=self.project(start)
+        _,nb,_=self.project(end)
+        if abs(na.dot(nb))>.99999:
+            return None
+        tolerance=max((end-start).length*1e-5,1e-6)
+        candidates=[]
+        for a,b in self.sharp_edges:
+            if any(abs((p-start).dot(na))>tolerance or abs((p-end).dot(nb))>tolerance for p in (a,b)):
+                continue
+            axis=(b-a).normalized()
+            ta,tb=(start-a).dot(axis),(end-a).dot(axis)
+            ha,hb=(start-a-axis*ta).length,(end-a-axis*tb).length
+            along=(ta*hb+tb*ha)/max(ha+hb,1e-12)
+            point=a+axis*max(0,min((b-a).length,along))
+            # Check the actual finite faces, not just their infinite planes.
+            if all((self.project(p.lerp(q,i/16))[0]-p.lerp(q,i/16)).length<tolerance
+                   for p,q in ((start,point),(point,end)) for i in range(17)):
+                candidates.append([start,point,end])
+        return min(candidates,key=lambda ps:cumulative(ps)[-1]) if candidates else None
+
+
+def edge_route_samples(points,count=100):
+    """Retain the exact fold point instead of replacing it with an inside chord."""
+    first=(points[1]-points[0]).length
+    second=(points[2]-points[1]).length
+    if first<1e-8:
+        return uniform_samples(points[1:],count)
+    if second<1e-8:
+        return uniform_samples(points[:2],count)
+    split=max(1,min(count-1,round(count*first/max(first+second,1e-12))))
+    return uniform_samples(points[:2],split)+uniform_samples(points[1:],count-split)[1:]
 
 
 def uniform_samples(points, count=100):
@@ -586,33 +644,42 @@ def spanning_route(surface, start, end, radius):
 
 
 def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1):
-    """Two parallel ropes tied together along one open overhand/figure-eight.
+    """An active overhand around a straight passive rope through its eye.
 
-    Both components use the same cut and frame. Independent cuts of a torus
-    link are unlinked open loops, not a bend made from the two ropes.
+    frame is the passive axis, ra/rb are the active/passive bundle envelopes.
+    component 0 returns the tying rope, component 1 the straight support.
     """
-    radius=max(ra,rb)
-    separation=(ra+rb)*.55*(1.45 if bundle>1.5 else 1)
-    scale=radius*(4.0 if bundle>1.5 else 2.9)*size
-    core=knot_points(center,frame,normal,scale,kind)
-    # Transport a common frame along the body. The two components occupy
-    # opposite sides of its normal; doubled runs occupy the orthogonal side.
-    previous=None
-    result=[]
-    for i,p in enumerate(core):
-        tangent=(core[min(i+1,len(core)-1)]-core[max(0,i-1)]).normalized()
-        if previous is None:
-            side=normal.cross(tangent)
-            if side.length<1e-6:
-                side=tangent.orthogonal()
+    axis=frame.normalized()
+    z=(normal-axis*normal.dot(axis)).normalized()
+    x=axis.cross(z).normalized()
+    if x.dot(lead)<0:
+        x.negate()
+    # The eye clears the passive rope, while depth separates the active
+    # over/under passes. Both ends of the open knot attach along x.
+    minor=ra*.7*size
+    major=rb+ra*1.15+minor
+    depth=ra*1.6*size
+    local=[]
+    for i in range(220):
+        t=math.pi/6+(5*math.pi/3)*i/219
+        if kind=='FIGURE_EIGHT':
+            radial=major+minor*math.cos(2*t)
+            a,b=radial*math.cos(3*t),radial*math.sin(3*t)
+            d=depth*math.sin(4*t)
         else:
-            side=last_tangent.rotation_difference(tangent) @ previous
-        side=(side-tangent*side.dot(tangent)).normalized()
-        up=tangent.cross(side).normalized()
-        result.append(p+up*separation*(1 if component else -1))
-        previous,last_tangent=side,tangent
-    # Both components share this lift, preserving the tied bundle geometry.
-    return [p+normal*radius*(2.5 if bundle>1.5 else 1.3) for p in result]
+            radial=major+minor*math.cos(3*t)
+            a,b=radial*math.cos(2*t),radial*math.sin(2*t)
+            d=depth*math.sin(3*t)
+        local.append(Vector((a,b,d)))
+    chord=local[-1]-local[0]
+    chord=Vector((chord.x,chord.y,0)).normalized()
+    perpendicular=Vector((-chord.y,chord.x,0))
+    height=-min(p.dot(perpendicular) for p in local)+ra*1.08
+    origin=center+z*height
+    if component:
+        reach=depth+ra*1.2
+        return [origin+axis*reach*(2*i/30-1) for i in range(31)]
+    return [origin+x*p.dot(chord)+z*p.dot(perpendicular)+axis*p.z for p in local]
 
 
 def fair_contact_path(surface, points, radius, amount=1, pinned=(), references=None):
@@ -690,11 +757,11 @@ def round_bends(surface,points,radius,minimum_radius,protected=None):
         bend_radius=u.length*v.length*(b-a).length/(2*cross) if cross>1e-10 else 1e20
         if bend_radius<minimum_radius and any(point_segment_distance(p,a,b)<radius*3 for a,b in surface.sharp_edges):
             bends.append(lengths[i])
-    if not bends:
+    if not bends and not surface.convex_edges:
         return points
     padding=[]
     for station in lengths:
-        d=min(abs(station-b) for b in bends)
+        d=min((abs(station-b) for b in bends),default=float('inf'))
         t=max(0,min(1,(minimum_radius*5-d)/(minimum_radius*3)))
         padding.append(radius+(minimum_radius-radius)*t*t*(3-2*t))
     result=[p.copy() for p in points]
