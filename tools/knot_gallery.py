@@ -71,6 +71,6 @@ scene.render.resolution_x = 1200
 scene.render.resolution_y = 900
 scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'
-scene.render.filepath = str(ROOT / 'dist' / 'surface-ropes-0.9.0-knots.png')
+scene.render.filepath = str(ROOT / 'dist' / 'surface-ropes-0.9.1-knots.png')
 bpy.ops.render.render(write_still=True)
 print('KNOT_GALLERY_RENDERED')

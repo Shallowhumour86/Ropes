@@ -121,3 +121,15 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   At full smoothing the rope should cross the edge directly without a sideways
   detour. Repeat diagonally, with dense points very close to/on the edge, and
   with single/doubled ropes. Check from both sides and along the edge.
+
+## Lower overhand junction approaches (0.9.1)
+
+- In a 0.9.0 scene with single and doubled overhand junctions, install 0.9.1 and
+  Rebuild Ropes. Look from the side: the tying rope should approach the lower
+  knot opening smoothly, without the previous steep arch above the body.
+- Check both ends and either tying-rope ownership. Repeat at a self-crossing.
+  The passive section and its approaches should match their previous path.
+- Trace the active knot and check the passive rope still passes through its
+  eye. Toggle back to a crossing and confirm its over/under choice is retained.
+- Check individual knots, figure-eight junctions, corner and curved-surface
+  routing retain their 0.9.0 behavior.

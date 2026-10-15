@@ -4,6 +4,12 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
+Version 0.9.1 turns compact-overhand junction bodies by a half-turn around the
+passive axis and reverses their traversal, placing both open attachments lower.
+Short attachment guards align with the tying rope's direction. The passive core
+and its approaches retain the 0.9.0 geometry; topology and clearance remain
+covered by the junction regression tests.
+
 Version 0.9 junctions use a single open parameterized overhand/figure-eight
 around the passive rope's axis. The passive section remains straight through
 its eye; clearance approaches allow the active rope to pass beneath it.

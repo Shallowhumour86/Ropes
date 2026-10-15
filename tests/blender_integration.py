@@ -1069,6 +1069,43 @@ class RopesIntegration(unittest.TestCase):
         self.assertFalse(ropes.junction_active_a(self.settings.junctions[0]))
         self.assertTrue(self.settings.junctions[0].knot_owner_set)
 
+    def test_junction_overhand_leads_are_lower_and_passive_is_unchanged(self):
+        from zipfile import ZipFile
+        # Compare with the shipped version whose passive rope was accepted.
+        reference={}
+        with ZipFile(ROOT/'dist'/'surface-ropes-0.9.0.zip') as archive:
+            exec(compile(archive.read('ropes/geometry.py'),'geometry_090.py','exec'),reference)
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
+        for doubled in (False,True):
+            with ropes.quiet_updates():
+                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+            with patch.object(ropes,'junction_points',reference['junction_points']):
+                ropes.rebuild(bpy.context.scene,self.target,repath=False)
+                passive_before=[tuple(p) for p in ropes.visible_path(b)]
+            ropes.rebuild(bpy.context.scene,self.target,repath=False)
+            passive_after=ropes.visible_path(b)
+            self.assertEqual(len(passive_before),len(passive_after))
+            self.assertLess(max((Vector(p)-q).length for p,q in zip(passive_before,passive_after)),b.ropes_rope.radius*1e-5)
+            station=ropes.knot_records(bpy.context.scene,a)[0]['station']
+            points=ropes.visible_path(a)
+            stations=json.loads(a['ropes_stations'])
+            approaches=[p for p,s in zip(points,stations) if 1e-6<abs(s-station)<ropes.knot_extent(ropes.knot_records(bpy.context.scene,a)[0],a)]
+            # 0.9.0 rose to 5.6 radii (single) / 13 radii (doubled).
+            self.assertLess(max(p.z for p in approaches),a.ropes_rope.radius*(6.5 if doubled else 3))
+            core=ropes.junction_points(Vector(),Vector((0,1,0)),Vector((1,0,0)),Vector((0,0,1)),ropes.envelope_radius(a),ropes.envelope_radius(b),0,'OVERHAND')
+            tangent=Vector((1,0,0))
+            self.assertGreater((core[1]-core[0]).normalized().dot(tangent),.98)
+            self.assertGreater((core[-1]-core[-2]).normalized().dot(tangent),.98)
+            for guard in (core[:15],core[-15:]):
+                for p,q,r in zip(guard,guard[1:],guard[2:]):
+                    u,v=q-p,r-q
+                    cross=u.cross(v).length
+                    if cross>1e-10:
+                        bend=u.length*v.length*(r-p).length/(2*cross)
+                        self.assertGreater(bend,ropes.envelope_radius(a))
+
     def test_junction_active_knot_encircles_passive_axis(self):
         from ropes.geometry import junction_points,point_segment_distance
         for kind,expected in (('OVERHAND',3),('FIGURE_EIGHT',5)):

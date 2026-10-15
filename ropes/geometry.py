@@ -679,6 +679,16 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
     if component:
         reach=depth+ra*1.2
         return [origin+axis*reach*(2*i/30-1) for i in range(31)]
+    if kind=='OVERHAND':
+        # Put the existing opening on the lower side of the passive axis.
+        # A half-turn and reversed traversal retain the same knot and eye,
+        # but bring the two attachments down instead of arching over the body.
+        core=[origin-x*p.dot(chord)-z*p.dot(perpendicular)+axis*p.z for p in reversed(local)]
+        # Give the entry guards enough horizontal room to turn into the body;
+        # aligning a tangent at an unmoved port otherwise creates a tight elbow.
+        core[0]-=x*ra*1.5
+        core[-1]+=x*ra*1.5
+        return align_knot_entries(core,lead,count=12)
     return [origin+x*p.dot(chord)+z*p.dot(perpendicular)+axis*p.z for p in local]
 
 

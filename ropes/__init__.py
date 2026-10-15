@@ -1,10 +1,10 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 9, 0),
+    'version': (0, 9, 1),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
-    'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
+    'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
     'category': 'Object',
 }
 
