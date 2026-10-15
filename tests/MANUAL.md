@@ -3,7 +3,7 @@
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.7.0 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.8.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -91,3 +91,17 @@ underlying geometry and projected mouse math, rather than all UI behavior.
 - Inspect compact-overhand bodies from above and from the side: entry/exit ports
   should align with the running rope after rotating the whole body. Repeat after
   moving the knot and on a doubled rope.
+
+## Junction topology and convex edges (0.8.0)
+
+- Cross two single ropes, enable a compact overhand junction, and trace each
+  rope through the knot. Repeat with doubled ropes and with figure eight.
+  Each rope should follow the selected knot path, with no crushed/tangled core.
+- Repeat at a self-crossing, reverse over/under, and toggle back to a junction.
+- Route single and doubled ropes over a cube edge with both sparse waypoints
+  and points tightly packed on each side and directly on the edge. Check from
+  the side: the rope should meet the surface with thickness clearance and
+  should not form a broad lifted arch or strand-frame kink.
+- Extend a rope that ends near an edge to the other side. The flat section
+  should remain at contact height after extending and after Rebuild Ropes.
+- Check existing individual knots and curved surfaces retain their 0.7 behavior.

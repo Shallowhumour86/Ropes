@@ -1,3 +1,17 @@
+## 0.8.0
+
+- Replaced independently cut junction loops with paired open knot centerlines.
+  Both participating ropes follow the selected overhand/figure-eight topology;
+  tests verify knot determinants of 3/5 using an outside closure of the ports.
+- Fixed knot cores during junction collision resolution, preventing the lead
+  solver from distorting their traced structure. Included all doubled runs.
+- Removed broad excess clearance around convex edges while preserving the
+  concave-valley handling and soft curved-surface contact.
+- Used physical-distance tangent estimates for doubled runs and uniform
+  arclength samples for visible strands, avoiding dense-waypoint frame flips.
+- Added Blender 4.4 regression coverage and single/doubled junction and cube-edge
+  previews. Existing scenes update through Rebuild Ropes.
+
 # 0.7.0
 
 - Removed broad bend-cushion lift from smooth curved surfaces; retained clearance

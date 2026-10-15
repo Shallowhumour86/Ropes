@@ -4,9 +4,13 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
-Junction knots use independently implemented two-component torus-link curves,
-with each rope following one component. They are visual interwoven junctions;
-style selection changes the winding rather than simulating a named rope bend.
+Version 0.8 junction knots use two parallel components of the same open
+parameterized knot, with a transported cross-section frame. This replaces the
+independently cut torus-link loops from earlier versions. Both ropes traverse
+the selected overhand or figure-eight path; doubled bundles carry four runs.
+Their core paths remain fixed during the local lead-clearance correction.
+Regression tests verify the selected knot's determinant after an outside
+closure of its open ports (3 for overhand/trefoil, 5 for figure-eight).
 Version 0.7 selects better-aligned overhand attachment ports and rigidly rotates
 the knot body along its attachment chord before fairing the joins.
 Version 0.6 aligns attachment tangents and relaxes shared junction curves under

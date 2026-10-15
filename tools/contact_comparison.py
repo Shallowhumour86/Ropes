@@ -19,7 +19,7 @@ with zipfile.ZipFile(ROOT/'dist'/'surface-ropes-0.6.0.zip') as archive:
 sys.path.insert(0,str(reference_root))
 old=importlib.import_module('ropes_060_reference')
 owners=[]
-for row,label in [( .8,'0.6.0'),(-.8,'0.7.0')]:
+for row,label in [( .8,'0.6.0'),(-.8,'0.8.0')]:
     with ropes.quiet_updates():
         rope=ropes.new_rope(scene,target)
         rope.name=label
@@ -35,7 +35,7 @@ legacy.data.bevel_depth=0
 for index,strand in enumerate(old.three_strands(path,legacy.ropes_rope.radius,legacy.ropes_rope.strand_pitch)):
     helper=next(o for o in scene.objects if o.get('ropes_owner')==legacy.ropes_rope.uid and o.get('ropes_strand')==index)
     ropes.set_strand(helper,strand,legacy.ropes_rope.radius)
-for row,label in [( .8,'0.6.0'),(-.8,'0.7.0')]:
+for row,label in [( .8,'0.6.0'),(-.8,'0.8.0')]:
     bpy.ops.object.text_add(location=(-1.95,row+.25,.2))
     text=bpy.context.object
     text.data.body=label
@@ -43,5 +43,5 @@ for row,label in [( .8,'0.6.0'),(-.8,'0.7.0')]:
 ''' +source[b:]
 source=source.replace('settings.radius = .075','settings.radius = .05').replace('settings.squish = .65','settings.squish = 0')
 source=source.replace('location=(0, -6, 7)','location=(0, -6, 4)').replace('ortho_scale = 6.3','ortho_scale = 4.6')
-source=source.replace('surface-ropes-0.7.0-knots.png','surface-ropes-0.7.0-contact.png')
+source=source.replace('surface-ropes-0.8.0-knots.png','surface-ropes-0.8.0-contact.png')
 exec(compile(source,str(Path(__file__).with_name('knot_gallery.py')),'exec'))

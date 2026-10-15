@@ -1,4 +1,4 @@
-# Surface Ropes 0.7.0 — Blender 4.4
+# Surface Ropes 0.8.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.7.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.7.0.zip).
+[Download version 0.8.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.8.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,24 +23,26 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.7.0
+## New in 0.8.0
 
-- Normal single and doubled runs stay on the surface contact envelope across
-  smooth curved geometry. Each doubled run settles onto its own contact surface.
-- The extra bend cushion is restricted to actual hard mesh edges (45 degrees or
-  sharper), instead of being added across ordinary curved surfaces.
-- Deliberate waypoint turns are rounded along the surface, without lifting them.
-  Free spans, over/under arches and knot geometry retain their intended clearance.
-- Compact-overhand attachment ports are cut at a better-aligned part of the curve.
-  The whole knot body is rigidly reoriented along its entry/exit chord and rolled
-  into a compact surface-facing pose. The short entry joins are then smoothed.
+- Junction knots tie both ropes along a shared open overhand or figure-eight
+  path. The former independently cut loops have been replaced. Both components
+  retain the selected knot topology while collision correction adjusts the leads.
+- Doubled junctions carry all four runs through the shared knot. The core allows
+  for the bundle thickness rather than squeezing tubes through one another.
+- Ropes wrapping around convex edges settle back onto the surface contact
+  envelope, removing the broad lift produced by the former bend cushion.
+- Strand frames use uniform physical samples, and doubled runs estimate direction
+  over a short physical distance. Closely packed waypoints no longer feed tiny
+  reversed segments into the visible strand geometry.
+- Individual knot orientation and curved-surface contact from 0.7.0 are retained.
 
-[Surface contact: 0.6.0 versus 0.7.0](dist/surface-ropes-0.7.0-contact.png) ·
-[Reoriented knot bodies](dist/surface-ropes-0.7.0-knots.png)
+[Single and doubled junction knots](dist/surface-ropes-0.8.0-junction.png) ·
+[Sparse and dense waypoint paths around a cube edge](dist/surface-ropes-0.8.0-corners.png)
 
 Install the ZIP and click **Rebuild Ropes** to update existing rope geometry.
 Waypoint Size, waypoint depth visibility, deferred draft editing, spanning types,
-shared junctions and all other controls from 0.6.0 remain available.
+shared junctions and the other existing controls remain available.
 
 ## Plan with waypoints
 
@@ -217,13 +219,13 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 46 integration checks cover routing, flat/curved smoothing, independent
+The 49 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
 marker size/depth picking, generated-rope draft editing/persistence, coarse
 valleys, cube-corner bend radii, bounded contact gaps on curved surfaces, knot
 body orientation, knot tangents and junction entry clearance, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0, 0.5.0 and 0.6.0
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.6.0 and 0.7.0
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.

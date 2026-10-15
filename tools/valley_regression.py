@@ -26,5 +26,5 @@ ropes.rebuild(scene,target)
 ''' +source[b:]
 source=source.replace('settings.radius = .075','settings.radius = .04').replace('settings.squish = .65','settings.squish = 0')
 source=source.replace('location=(0, -6, 7)','location=(2, -6, 6)').replace('ortho_scale = 6.3','ortho_scale = 5')
-source=source.replace('surface-ropes-0.7.0-knots.png','surface-ropes-0.7.0-valley-regression.png')
+source=source.replace('surface-ropes-0.8.0-knots.png','surface-ropes-0.8.0-valley-regression.png')
 exec(compile(source,str(Path(__file__).with_name('knot_gallery.py')),'exec'))

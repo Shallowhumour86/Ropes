@@ -32,11 +32,16 @@ class Surface:
         normal_matrix=obj.matrix_world.to_3x3().inverted_safe().transposed()
         self.normals=[(normal_matrix @ v.normal).normalized() for v in bm.verts]
         self.sharp_edges=[]
+        self.convex_edges=[]
         for edge in (bm.edges if routing else []):
             if len(edge.link_faces)==2:
                 na,nb=[(normal_matrix @ face.normal).normalized() for face in edge.link_faces]
                 if na.dot(nb)<math.cos(math.radians(45)):
-                    self.sharp_edges.append(tuple(self.vertices[v.index] for v in edge.verts))
+                    segment=tuple(self.vertices[v.index] for v in edge.verts)
+                    self.sharp_edges.append(segment)
+                    fa,fb=edge.link_faces
+                    if fa.normal.dot(fb.calc_center_median()-fa.calc_center_median()) < -1e-7:
+                        self.convex_edges.append(segment)
         self.adjacency = [[] for _ in self.vertices]
         for edge in (bm.edges if routing else []):
             a, b = (v.index for v in edge.verts)
@@ -170,7 +175,7 @@ def smooth_surface_path(surface, points, amount):
 
 def three_strands(points, radius, pitch=12.0):
     """Three touching helices around the centerline with parallel-transport frames."""
-    dense = resample(points, radius*.6)
+    dense = uniform_samples(points,max(2,math.ceil(cumulative(points)[-1]/(radius*.3))))
     lengths = cumulative(dense)
     strands = [[], [], []]
     last_x = None
@@ -385,19 +390,27 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
     return result
 
 
-def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None, surface_refs=None):
+def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None, surface_refs=None, junction_stations=()):
     """One continuous folded rope: two runs, joined by a bight at the start."""
     lanes = [[], []]
     last_side = None
     half = radius*1.01*spacing
+    physical_lengths=cumulative(points)
     for i, point in enumerate(points):
         nearest, normal, _ = surface.project(point)
         normal = normals[i] if normals is not None else surface.normal_at(nearest)
-        tangent = points[min(i+1, len(points)-1)]-points[max(0, i-1)]
+        tangent = (sample_at(points,physical_lengths,min(physical_lengths[-1],physical_lengths[i]+radius*.5))[0]
+                   -sample_at(points,physical_lengths,max(0,physical_lengths[i]-radius*.5))[0])
         if tangent.length < 1e-8:
             tangent = Vector((1, 0, 0))
         tangent.normalize()
-        if last_side is None:
+        at_core=any(abs(stations[i]-s)<1e-8 for s in junction_stations)
+        if i+1<len(stations) and abs(stations[i+1]-stations[i])<1e-8:
+            tangent=points[min(i+1,len(points)-1)]-points[max(0,i-1)]
+            tangent.normalize()
+        core_start=(at_core and i+1<len(stations) and abs(stations[i+1]-stations[i])<1e-8
+                    and (i==0 or abs(stations[i]-stations[i-1])>1e-8))
+        if last_side is None or core_start:
             side = normal.cross(tangent)
             if side.length < 1e-5:
                 side = tangent.orthogonal()
@@ -573,26 +586,33 @@ def spanning_route(surface, start, end, radius):
 
 
 def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1):
-    """Two components of a torus link: both ropes alternate over and under."""
-    x=frame.normalized()
-    z=normal.normalized()
-    y=z.cross(x).normalized()
-    if y.length < .1:
-        y=x.orthogonal().normalized()
-    z=x.cross(y).normalized()
-    minor=max(ra,rb)*(1.05+.45*(bundle-1))*size
-    major=minor+max(ra,rb)*1.05*size
-    height=minor+max(ra,rb)*1.15
-    winding={'OVERHAND':1,'FIGURE_EIGHT':2,'TREFOIL':3}[kind]
-    cut=math.atan2(lead.dot(y),lead.dot(x))+math.pi/2
-    phase=component*math.pi
+    """Two parallel ropes tied together along one open overhand/figure-eight.
+
+    Both components use the same cut and frame. Independent cuts of a torus
+    link are unlinked open loops, not a bend made from the two ropes.
+    """
+    radius=max(ra,rb)
+    separation=(ra+rb)*.55*(1.45 if bundle>1.5 else 1)
+    scale=radius*(4.0 if bundle>1.5 else 2.9)*size
+    core=knot_points(center,frame,normal,scale,kind)
+    # Transport a common frame along the body. The two components occupy
+    # opposite sides of its normal; doubled runs occupy the orthogonal side.
+    previous=None
     result=[]
-    for i in range(220):
-        t=cut+.32-(2*math.pi-.64)*i/219
-        phi=winding*t+phase
-        result.append(center+(major+minor*math.cos(phi))*(math.cos(t)*x+math.sin(t)*y)+
-                      (height+minor*math.sin(phi))*z)
-    return result
+    for i,p in enumerate(core):
+        tangent=(core[min(i+1,len(core)-1)]-core[max(0,i-1)]).normalized()
+        if previous is None:
+            side=normal.cross(tangent)
+            if side.length<1e-6:
+                side=tangent.orthogonal()
+        else:
+            side=last_tangent.rotation_difference(tangent) @ previous
+        side=(side-tangent*side.dot(tangent)).normalized()
+        up=tangent.cross(side).normalized()
+        result.append(p+up*separation*(1 if component else -1))
+        previous,last_tangent=side,tangent
+    # Both components share this lift, preserving the tied bundle geometry.
+    return [p+normal*radius*(2.5 if bundle>1.5 else 1.3) for p in result]
 
 
 def fair_contact_path(surface, points, radius, amount=1, pinned=(), references=None):
@@ -688,6 +708,21 @@ def round_bends(surface,points,radius,minimum_radius,protected=None):
             p+=contact_correction(surface,p,padding[i],result[i])
             updated.append(p)
         result=updated+[result[-1]]
+    # Convex edges need a radius-sized offset arc, not a large clearance
+    # cushion. Settle every affected sample back onto that offset envelope.
+    convex=[i for i,p in enumerate(points) if any(point_segment_distance(p,a,b)<minimum_radius*6 for a,b in surface.convex_edges)
+            and not (protected is not None and protected[i])]
+    for _ in range(32):
+        updated=list(result)
+        for i in convex:
+            p=result[i]
+            if 0<i<len(result)-1:
+                p=p.lerp((result[i-1]+result[i+1])/2,.45)
+            co,n,_=surface.project(p)
+            delta=p-co
+            direction=delta.normalized() if delta.length>1e-8 and not surface.inside(p) else n
+            updated[i]=co+direction*radius*1.05
+        result=updated
     return result
 
 

@@ -21,6 +21,34 @@ print("BLENDER_TEST_VERSION", bpy.app.version_string)
 ropes.register()
 
 
+def knot_determinant(points):
+    """Fox coloring matrix determinant after an outside closure of open ports."""
+    import bisect
+    import numpy as np
+    a,b=points[0],points[-1]
+    reach=max(p.length for p in points)*10+1
+    points=points+[b+Vector((reach,0,0)),b+Vector((reach,-reach,0)),a+Vector((-reach,-reach,0)),a+Vector((-reach,0,0))]
+    direction=Vector((.217,.413,.884)).normalized();x=direction.orthogonal().normalized();y=direction.cross(x)
+    pts=[Vector((p.dot(x),p.dot(y),p.dot(direction))) for p in points];pts.append(pts[0]);cs=[]
+    for i,(a,b) in enumerate(zip(pts,pts[1:])):
+        for j in range(i+2,len(pts)-1):
+            if i==0 and j==len(pts)-2:continue
+            c,d=pts[j:j+2];u=b-a;v=d-c;den=u.x*v.y-u.y*v.x
+            if abs(den)<1e-12:continue
+            w=c-a;t=(w.x*v.y-w.y*v.x)/den;s=(w.x*u.y-w.y*u.x)/den
+            if not(1e-7<t<1-1e-7 and 1e-7<s<1-1e-7):continue
+            ai=i+t;bj=j+s
+            over,under=(ai,bj) if a.z+t*u.z>c.z+s*v.z else (bj,ai)
+            cs.append((over,under))
+    under=sorted(c[1] for c in cs);n=len(under)
+    if n==0:return 1
+    mat=np.zeros((n,n),dtype=int)
+    for k,(o,u) in enumerate(cs):
+        after=bisect.bisect_right(under,u)%n;before=(after-1)%n;oa=bisect.bisect_right(under,o)%n
+        mat[k,oa]+=2;mat[k,after]-=1;mat[k,before]-=1
+    return round(abs(np.linalg.det(mat[:-1,:-1])))
+
+
 class RopesIntegration(unittest.TestCase):
     def setUp(self):
         bpy.ops.object.select_all(action='SELECT')
@@ -797,13 +825,14 @@ class RopesIntegration(unittest.TestCase):
             core=align_knot_entries(knot_points(Vector(),tangent,normal,.05,kind),tangent)
             self.assertGreater((core[1]-core[0]).normalized().dot(tangent),.98)
             self.assertGreater((core[-1]-core[-2]).normalized().dot(tangent),.98)
-        normal_core=knot_points(Vector(),tangent,normal,.05,'OVERHAND')
+        from ropes.geometry import point_segment_distance
         for bundle in (1,2.01):
-            core=junction_points(Vector(),tangent,tangent,normal,.05,.05,0,'OVERHAND',bundle=bundle)
-            # Old doubled junction used full-envelope major/minor: 7.6 radii.
-            self.assertLess(max(p.length for p in core),.05*7)
-            radial=[math.hypot(p.x,p.y) for p in core]
-            self.assertLess(min(radial),.05*1.1)
+            cores=[junction_points(Vector(),tangent,tangent,normal,.05,.05,c,'OVERHAND',bundle=bundle) for c in (0,1)]
+            # A shared knot must accommodate both ropes (four runs when doubled).
+            # Test actual tube clearance instead of the old undersized loop bound.
+            gap=min(point_segment_distance(p,a,b) for p in cores[0] for a,b in zip(cores[1],cores[1][1:]))
+            self.assertGreater(gap,.05*2)
+            self.assertLess(max(p.length for core in cores for p in core),.05*(24 if bundle>1.5 else 16))
 
     def test_junction_entries_clear_other_core_single_and_doubled(self):
         from ropes.geometry import point_segment_distance
@@ -828,7 +857,7 @@ class RopesIntegration(unittest.TestCase):
                         gap=min(point_segment_distance(point,p,q) for p,q in segments)
                         self.assertGreaterEqual(gap,lead.ropes_rope.radius*1.95)
 
-    def test_sharp_cube_corner_rounds_beyond_rope_thickness(self):
+    def test_sharp_cube_corner_rounds_at_contact_height(self):
         bpy.ops.mesh.primitive_cube_add(size=2)
         self.target=bpy.context.object
         self.settings.target=self.target
@@ -846,7 +875,8 @@ class RopesIntegration(unittest.TestCase):
                 if cross>1e-10:
                     radii.append(u.length*v.length*(c-a).length/(2*cross))
             self.assertTrue(radii)
-            self.assertGreater(min(radii),r.ropes_rope.radius*1.8)
+            self.assertGreater(min(radii),r.ropes_rope.radius)
+        self.assertLess(max((p-Surface(self.target,1).project(p)[0]).length for p in points if p.x>.8 and p.z>.8),r.ropes_rope.radius*1.2)
 
         # A distant knot must not disable corner rounding on the rest of a rope.
         ropes.knot_at(bpy.context.scene,r,.25)
@@ -859,7 +889,8 @@ class RopesIntegration(unittest.TestCase):
             cross=u.cross(v).length
             if cross>1e-10:
                 radii.append(u.length*v.length*(c-a).length/(2*cross))
-        self.assertGreater(min(radii),r.ropes_rope.radius*1.8)
+        self.assertGreater(min(radii),r.ropes_rope.radius)
+        self.assertLess(max((p-Surface(self.target,1).project(p)[0]).length for p in points if p.x>.8 and p.z>.8),r.ropes_rope.radius*1.2)
 
     def test_coarse_monkey_doubled_route_has_no_large_excursions(self):
         bpy.ops.mesh.primitive_monkey_add()
@@ -942,6 +973,62 @@ class RopesIntegration(unittest.TestCase):
                     radii.append(u.length*v.length*(c-a).length/(2*cross))
             self.assertTrue(radii)
             self.assertGreater(min(radii),r.ropes_rope.radius*1.2)
+
+    def test_dense_corner_waypoints_have_contact_and_stable_frames(self):
+        from ropes.geometry import uniform_samples
+        bpy.ops.mesh.primitive_cube_add(size=2)
+        self.target=bpy.context.object
+        self.settings.target=self.target
+        self.settings.radius=.05
+        r=self.rope((-.7,0,1),(.8,0,1),(.95,0,1),(1,0,1),(1,0,.95),(1,0,.8),(1,0,-.7))
+        surface=Surface(self.target,1)
+        for doubled in (False,True):
+            r.ropes_rope.doubled=doubled
+            points=ropes.visible_path(r)
+            gaps=[(p-surface.project(p)[0]).length for p in points]
+            self.assertLess(max(gaps),.05*1.2)
+            self.assertGreater(min(gaps),.05)
+            # Check the physical curve at strand sampling resolution; duplicate
+            # waypoint stations must not reverse the transported strand frame.
+            physical=uniform_samples(points,math.ceil(cumulative(points)[-1]/(.05*.3)))
+            for a,b,c in zip(physical,physical[1:],physical[2:]):
+                if b.x>.8 and b.z>.8:
+                    self.assertGreater((b-a).normalized().dot((c-b).normalized()),.75)
+
+    def test_shared_knot_topology_matches_selected_style(self):
+        from ropes.geometry import junction_points
+        for kind,expected in (('OVERHAND',3),('FIGURE_EIGHT',5)):
+            for bundle in (1,2.01):
+                for component in (0,1):
+                    core=junction_points(Vector(),Vector((1,0,0)),Vector((0,1,0)),Vector((0,0,1)),.05,.05,component,kind,bundle=bundle)
+                    # 3 is the trefoil/overhand determinant, 5 the figure eight;
+                    # the unknot is 1. This checks the traced rope topology.
+                    self.assertEqual(knot_determinant(core),expected,(kind,bundle,component))
+
+    def test_shared_knot_core_survives_collision_resolution(self):
+        from ropes.geometry import point_segment_distance
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        for doubled in (False,True):
+            with ropes.quiet_updates():
+                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+            ropes.rebuild(bpy.context.scene,self.target)
+            self.settings.junctions[0].is_knot=True
+            surface=Surface(self.target,1)
+            displays={r.name:ropes.display_path(bpy.context.scene,r,surface,ropes.rest_path(r)) for r in (a,b)}
+            before={name:[p.copy() for p in data[0]] for name,data in displays.items()}
+            ropes.separate_knot_leads(bpy.context.scene,self.target,surface,displays)
+            cores={}
+            for r in (a,b):
+                station=ropes.knot_records(bpy.context.scene,r)[0]['station']
+                points,stations=displays[r.name]
+                indices=[i for i,s in enumerate(stations) if abs(s-station)<1e-6]
+                self.assertGreater(len(indices),100)
+                for i in indices:
+                    self.assertEqual(tuple(points[i]),tuple(before[r.name][i]))
+                cores[r.name]=[(points[i],points[i+1]) for i in indices if i+1 in indices]
+            for p,q in cores[a.name]:
+                self.assertGreaterEqual(min(point_segment_distance(p,x,y) for x,y in cores[b.name]),a.ropes_rope.radius*1.95)
 
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()

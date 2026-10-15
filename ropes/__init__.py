@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 7, 0),
+    'version': (0, 8, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
@@ -631,7 +631,8 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             loop = knot_points(center+normal*radius, tangent, normal, body_radius*1.5, kind)
         else:
             loop = knot_points(center, tangent, normal, body_radius, kind)
-        loop=align_knot_entries(loop,tangent)
+        if not joint:
+            loop=align_knot_entries(loop,tangent)
         incoming = bezier_join(result[-1], sample_at(path, lengths, low)[1],
                                 loop[0], loop[1]-loop[0])
         result.extend(incoming)
@@ -750,8 +751,23 @@ def display_path(scene, rope, surface, path):
             hard=any(point_segment_distance(point,a,b)<radius*3 for a,b in surface.sharp_edges)
             surface_refs.append((point,tangent) if not raised and not hard and not span_at(rope,station) else None)
         rendered, stations = doubled_path(surface, rendered, stations, radius, rope.ropes_rope.double_spacing,
-                                         [span_at(rope,s) for s in stations], normals,surface_refs)
+                                         [span_at(rope,s) for s in stations], normals,surface_refs,[r['station'] for r in records if r['junction']])
         rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
+        mask=[not span_at(rope,s) and not any(abs(s-r['station'])<radius*14 for r in records)
+              and any(point_segment_distance(p,a,b)<radius*18 for a,b in surface.convex_edges)
+              for p,s in zip(rendered,stations)]
+        for _ in range(24):
+            updated=list(rendered)
+            for i,p in enumerate(rendered):
+                if not mask[i]:
+                    continue
+                if 0<i<len(rendered)-1:
+                    p=p.lerp((rendered[i-1]+rendered[i+1])/2,.4)
+                co,n,_=surface.project(p)
+                delta=p-co
+                direction=delta.normalized() if delta.length>1e-8 and not surface.inside(p) else n
+                updated[i]=co+direction*radius*1.05
+            rendered=updated
     for i,(a,b) in enumerate(zip(rendered,rendered[1:])):
         if span_at(rope,(stations[i]+stations[i+1])/2) and not segment_clear(surface,a,b,radius*1.01):
             raise ValueError('Spanning rope cannot clear the surface at this width. Move its waypoints or reduce width.')
@@ -764,7 +780,7 @@ def separate_knot_leads(scene,target,surface,displays):
     records={name:[r for r in knot_records(scene,owner) if r['junction']] for name,owner in owners.items()}
     if not any(records.values()):
         return
-    masks={name:[i not in (0,len(points)-1) and any(abs(station-r['station'])<owners[name].ropes_rope.radius*14 for r in records[name])
+    masks={name:[i not in (0,len(points)-1) and any(1e-6<abs(station-r['station'])<owners[name].ropes_rope.radius*14 for r in records[name])
                  for i,station in enumerate(stations)] for name,(points,stations) in displays.items()}
     for iteration in range(64):
         trees={}
