@@ -16,12 +16,12 @@ import addon_utils
 
 old_name = sys.argv[2] if len(sys.argv) > 2 else 'surface-ropes-0.1.0.zip'
 old = root / 'dist' / old_name
-new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.3.0.zip')
+new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.4.0.zip')
 assert bpy.ops.preferences.addon_install(filepath=str(old)) == {'FINISHED'}
 bpy.utils.refresh_script_paths()
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None
-expected_old = (0, 2, 1) if '0.2.1' in old_name else (0, 1, 0)
+expected_old = tuple(map(int, old_name.removeprefix('surface-ropes-').removesuffix('.zip').split('.')))
 assert module.bl_info['version'] == expected_old
 old_geometry = sys.modules['ropes.geometry']
 assert hasattr(old_geometry, 'three_strands') == (expected_old >= (0, 2, 0))
@@ -47,7 +47,7 @@ uid = rope.ropes_rope.uid
 assert bpy.ops.preferences.addon_install(filepath=str(new), overwrite=True) == {'FINISHED'}
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None, 'Upgraded add-on failed to enable'
-assert module.bl_info['version'] == (0, 3, 0)
+assert module.bl_info['version'] == (0, 4, 0)
 # The headless Python-module runner has no UI event loop to execute timers.
 assert module.migrate_after_enable() is None
 assert hasattr(sys.modules['ropes.geometry'], 'three_strands')

@@ -1,3 +1,12 @@
+# 0.4.0
+
+- Added draft waypoint placement and explicit Generate Rope.
+- Added Normal/Spanning waypoint types, editable per point; only two spanning
+  endpoints create a free, collision-checked leg with no compression.
+- Tightened minimum-size doubled compact overhand knots.
+- Made junction knots shared interwoven sections involving both crossing ropes.
+- Preserved existing installation recovery and enabled-upgrade support.
+
 # 0.3.0
 
 - Added visible waypoint markers and click-marker/click-surface relocation with

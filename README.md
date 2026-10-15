@@ -1,4 +1,4 @@
-# Surface Ropes 0.3.0 — Blender 4.4
+# Surface Ropes 0.4.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.3.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.3.0.zip).
+[Download version 0.4.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.4.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,21 +23,34 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.3.0
+## New in 0.4.0
 
-- Toggle waypoint markers, select a marker in Draw / Edit mode, then click a new
-  surface location to move it. The rope, crossings, knots and indentation update.
-  Waypoint moves participate in in-tool undo/redo.
-- Knots now indent the surface beneath their generated footprint, instead of only
-  along the original waypoint path. The same applies to both runs and the folded
-  end of a doubled rope.
-- Choose **Compact Overhand**, **Figure Eight** or **Legacy Trefoil**. Each rope
-  has a default, and individual knots/junction knots can override it.
-- **Doubled Rope** creates two parallel runs of one continuous rope, with a bight
-  at the first waypoint and two free ends at the final waypoint. **Run Spacing**
-  adjusts their separation.
-- Independent controls, live width updates, smoothing, three-strand shading,
-  in-tool undo/redo, and the installer fixes from 0.2.1 remain available.
+- Tighter doubled compact overhand knots at minimum Knot Size.
+- Junction knots now weave both crossing ropes into a shared shape.
+- **Waypoint Mode** lets you plan a rope before generating its geometry.
+- **Spanning** waypoints bridge gaps without indenting the surface.
+
+[Knot comparison](dist/surface-ropes-0.4.0-knots.png) ·
+[Both-rope junction preview](dist/surface-ropes-0.4.0-junction.png)
+
+## Plan with waypoints
+
+Enable **Waypoint Mode**, then **Draw New Rope**. Place your points and press
+**Enter** to finish planning. Click **Generate Rope** when ready. Draft markers
+remain visible, and can be moved before generation. No rope geometry or surface
+compression is created until you generate the rope.
+
+Choose **Normal** or **Spanning** for the next point in the sidebar, or press **T**
+while drawing to switch. Normal markers are spheres; spanning markers are cubes.
+Select a waypoint in the active rope's list to change its type later.
+
+Only a pair of adjacent Spanning waypoints creates a free span. Normal/Spanning
+and Spanning/Normal pairs follow the surface as usual. Free spans use a direct
+line when clear, otherwise try a collision-checked detour around the target mesh.
+They account for rope thickness, including doubled runs, and contribute no
+indentation. The route is an approximate shortest clear path, not a physical
+rope simulation. If no safe route is found, reduce the width or move the points.
+Collision checks use the target object's base mesh, not other scene objects.
 
 See `KNOT_SOURCES.md` for the inspected MIT-licensed reference and attribution.
 No downloaded knot meshes or additional runtime dependencies are required.
@@ -65,7 +78,7 @@ No downloaded knot meshes or additional runtime dependencies are required.
    removes only its final anchor outside drawing mode. **Remove Active Rope**
    removes the entire rope and its junctions.
 10. Finish drawing, choose a crossing in the junction list, then use
-    **Swap Over / Under**. This also selects which strand carries a junction knot.
+    **Swap Over / Under**. Both crossing ropes participate in a junction knot.
 
 The width control uses **radius** in Blender world units; the full rope diameter
 is twice that value. **Twist Pitch** is the length of one strand revolution in
@@ -138,16 +151,14 @@ rope restores the visible surface.
 
 ## Practical limits
 
-- Paths are approximations on a triangulated mesh. Disconnected islands cannot
-  be joined. Routing uses the base mesh rather than modifier-generated geometry
+- Paths are approximations on a triangulated mesh. Normal surface routes cannot join disconnected islands; spanning routes can. Routing uses the base mesh rather than modifier-generated geometry
   or other animated shape keys. Apply required geometry modifiers first.
 - Use outward-facing normals and a manifold mesh. Apply nonuniform scale.
 - Nearly parallel strands are not treated as crossings; very close crossings
   can merge. Dense knots and extreme compression may intersect.
 - Knots are connected procedural overhand/figure-eight sections spliced into a rope.
-  Junction knots
-  place this section on the selected over strand. They do not physically tie
-  both strands together. Compression is geometric, without collision solving,
+  Junction knots use a shared interwoven link with a separate component for each
+  crossing rope. These are procedural visual approximations of tied ropes. Compression is geometric, without collision solving,
   volume preservation, soft-body simulation, or calculated rope tension.
 - Knot editing uses a 16-pixel screen-distance threshold inside Draw / Edit mode.
   It does not resolve occlusion: orbit to the desired strand if several overlap.
@@ -177,10 +188,10 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 25 integration checks cover routing, flat/curved smoothing, independent
+The 32 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1 and 0.2.1
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1 and 0.3.0
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.

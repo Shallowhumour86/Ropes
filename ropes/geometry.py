@@ -25,6 +25,7 @@ class Surface:
         bm.verts.ensure_lookup_table()
         bm.verts.index_update()
         bm.normal_update()
+        self.closed = all(len(e.link_faces) == 2 for e in bm.edges)
         self.vertices = [obj.matrix_world @ v.co for v in bm.verts]
         self.faces = [tuple(v.index for v in f.verts) for f in bm.faces]
         self.adjacency = [[] for _ in self.vertices]
@@ -259,7 +260,7 @@ def crossings(paths, radius):
                            abs(f['sa']-sa) < radius*6 and abs(f['sb']-sb) < radius*6
                            for f in found):
                         continue
-                    found.append(dict(a=name_a, b=name_b, sa=sa, sb=sb, center=center))
+                    found.append(dict(a=name_a, b=name_b, sa=sa, sb=sb, center=center, ia=i, ib=j, ta=s, tb=t))
     return found
 
 
@@ -305,7 +306,7 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
     return result
 
 
-def doubled_path(surface, points, stations, radius, spacing=2.2):
+def doubled_path(surface, points, stations, radius, spacing=2.2, free=None):
     """One continuous folded rope: two runs, joined by a bight at the start."""
     lanes = [[], []]
     last_side = None
@@ -325,8 +326,11 @@ def doubled_path(surface, points, stations, radius, spacing=2.2):
         last_side = side.copy()
         height = max(radius*1.05, (point-nearest).dot(normal))
         for lane, sign in zip(lanes, (-1, 1)):
-            projected, n, _ = surface.project(nearest+side*(half*sign))
-            lane.append(projected+n*height)
+            if free is not None and free[i]:
+                lane.append(point+side*(half*sign))
+            else:
+                projected, n, _ = surface.project(nearest+side*(half*sign))
+                lane.append(projected+n*height)
     center = (lanes[0][0]+lanes[1][0])/2
     side = (lanes[0][0]-lanes[1][0])/2
     tangent = points[1]-points[0]
@@ -346,3 +350,114 @@ def bezier_join(a, a_tangent, b, b_tangent, count=16):
     d = b-b_tangent.normalized()*distance
     return [(1-t)**3*a+3*(1-t)**2*t*c+3*(1-t)*t*t*d+t**3*b
             for t in (i/count for i in range(1, count))]
+
+
+def segment_clear(surface, a, b, radius):
+    """Conservative sphere tracing plus an exact central-ray intersection check."""
+    delta = b-a
+    length = delta.length
+    if length < 1e-9:
+        co, n, _ = surface.project(a)
+        return (a-co).length >= radius
+    direction = delta/length
+    hit, _, _, distance = surface.bvh.ray_cast(a, direction, length)
+    if hit is not None and distance < length-1e-7:
+        return False
+    walked = 0.0
+    for _ in range(8192):
+        point = a+direction*walked
+        co, normal, _ = surface.project(point)
+        gap = (point-co).length
+        if gap < radius or (surface.closed and (point-co).dot(normal) < -1e-7):
+            return False
+        if walked >= length:
+            return True
+        step = max(gap-radius, 1e-7)
+        walked = min(length, walked+step*.8)
+    return False
+
+
+def spanning_route(surface, start, end, radius):
+    """Shortest verified line first; otherwise shorten a safe outside route."""
+    start, sn, _ = surface.project(start)
+    end, en, _ = surface.project(end)
+    a, b = start+sn*radius*1.35, end+en*radius*1.35
+    safe_radius = radius*1.08
+    if segment_clear(surface, a, b, safe_radius):
+        return uniform_samples([a, b], 100)
+    candidates = []
+    try:
+        base = surface.route(start, end, 1)
+        for lift in (2.5, 4, 8):
+            points = [surface.project(p)[0]+surface.project(p)[1]*radius*lift for p in base]
+            points = [a]+points+[b]
+            if all(segment_clear(surface, p, q, safe_radius) for p,q in zip(points,points[1:])):
+                candidates.append(points)
+                break
+    except ValueError:
+        pass
+    # A bounding-box visibility graph also works across disconnected islands.
+    low = Vector(tuple(min(p[k] for p in surface.vertices)-radius*3 for k in range(3)))
+    high = Vector(tuple(max(p[k] for p in surface.vertices)+radius*3 for k in range(3)))
+    nodes = [a,b]+[Vector((x,y,z)) for x in (low.x,high.x) for y in (low.y,high.y) for z in (low.z,high.z)]
+    graph = [[] for _ in nodes]
+    for i,p in enumerate(nodes):
+        for j in range(i+1,len(nodes)):
+            if segment_clear(surface,p,nodes[j],safe_radius):
+                weight=(p-nodes[j]).length
+                graph[i].append((j,weight))
+                graph[j].append((i,weight))
+    queue=[(0.0,0)]
+    distances={0:0.0}
+    previous={}
+    while queue:
+        distance,node=heapq.heappop(queue)
+        if node==1:
+            chain=[1]
+            while chain[-1] != 0:
+                chain.append(previous[chain[-1]])
+            candidates.append([nodes[i] for i in reversed(chain)])
+            break
+        if distance > distances[node]:
+            continue
+        for other,weight in graph[node]:
+            if distance+weight < distances.get(other,float('inf')):
+                distances[other]=distance+weight
+                previous[other]=node
+                heapq.heappush(queue,(distance+weight,other))
+    if not candidates:
+        raise ValueError('No collision-free span found. Reduce width or move the waypoints.')
+    best=min(candidates,key=lambda p:cumulative(p)[-1])
+    # Visibility shortcutting never substitutes an unverified chord.
+    result=[best[0]]
+    i=0
+    while i < len(best)-1:
+        j=len(best)-1
+        while j > i+1 and not segment_clear(surface,best[i],best[j],safe_radius):
+            j-=1
+        result.append(best[j])
+        i=j
+    return resample(result,max(radius*.5,cumulative(result)[-1]/600))
+
+
+def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1):
+    """Two components of a torus link: both ropes alternate over and under."""
+    x=frame.normalized()
+    z=normal.normalized()
+    y=z.cross(x).normalized()
+    if y.length < .1:
+        y=x.orthogonal().normalized()
+    z=x.cross(y).normalized()
+    major=(1.6*max(ra,rb)+.9*min(ra,rb))*size
+    minor=.65*(ra+rb)*size
+    height=minor+max(ra,rb)*1.15
+    winding={'OVERHAND':1,'FIGURE_EIGHT':2,'TREFOIL':3}[kind]
+    cut=math.atan2(lead.dot(y),lead.dot(x))+math.pi/2
+    phase=component*math.pi
+    result=[]
+    for i in range(220):
+        t=cut+.32-(2*math.pi-.64)*i/219
+        phi=winding*t+phase
+        result.append(center+(major+minor*math.cos(phi))*(math.cos(t)*x+math.sin(t)*y)+
+                      (height+minor*math.sin(phi))*z)
+    return result

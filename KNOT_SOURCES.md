@@ -4,6 +4,10 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
+Junction knots use independently implemented two-component torus-link curves,
+with each rope following one component. They are visual interwoven junctions;
+style selection changes the winding rather than simulating a named rope bend.
+
 A freely available reference was inspected during implementation:
 
 - **pyknotid**, Alexander Taylor and other contributors, MIT licensed:

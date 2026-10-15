@@ -35,6 +35,8 @@ class RopesIntegration(unittest.TestCase):
         self.settings.tension = .5
         self.settings.smoothing = 1
         self.settings.show_waypoints = False
+        self.settings.waypoint_mode = False
+        self.settings.placement_kind = 'NORMAL'
         self.settings.knot_type = 'OVERHAND'
         self.settings.knot_size = 1
         self.settings.doubled = False
@@ -476,6 +478,132 @@ class RopesIntegration(unittest.TestCase):
         self.assertTrue(j.is_knot)
         self.assertEqual(j.kind, 'FIGURE_EIGHT')
 
+    def test_draft_waypoints_generate_only_on_request(self):
+        self.settings.waypoint_mode=True
+        self.settings.squish=.8
+        r=self.rope((-1,0,0),(0,.6,0),(1,0,0))
+        self.assertFalse(r.ropes_rope.generated)
+        self.assertFalse(r.data.splines)
+        self.assertFalse(any(o.get('ropes_helper') for o in bpy.context.scene.objects))
+        self.assertIsNone(self.target.data.shape_keys)
+        self.assertEqual(len([o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]),3)
+        ropes.move_waypoint(bpy.context.scene,r,1,(0,-.5,0))
+        self.assertFalse(r.data.splines)
+        self.assertEqual(bpy.ops.ropes.generate(),{'FINISHED'})
+        self.assertTrue(r.ropes_rope.generated)
+        self.assertTrue(r.data.splines)
+        self.assertEqual(len([o for o in bpy.context.scene.objects if o.get('ropes_helper')]),3)
+        self.assertIsNotNone(self.target.data.shape_keys)
+
+    def test_failed_draft_generation_preserves_plan(self):
+        self.settings.waypoint_mode=True
+        r=ropes.new_rope(bpy.context.scene,self.target)
+        r.ropes_rope.anchors.add().position=(0,0,0)
+        with self.assertRaisesRegex(RuntimeError, 'at least two waypoints'):
+            bpy.ops.ropes.generate()
+        self.assertFalse(r.ropes_rope.generated)
+        self.assertEqual(len(r.ropes_rope.anchors),1)
+
+    def test_spanning_direct_gap_and_zero_deformation(self):
+        bm=bmesh.new()
+        for x in (-1.5,1.5):
+            verts=[bm.verts.new((x+dx,y,0)) for dx,y in ((-.5,-.5),(.5,-.5),(.5,.5),(-.5,.5))]
+            bm.faces.new(verts)
+        mesh=bpy.data.meshes.new('Gap mesh')
+        bm.to_mesh(mesh)
+        bm.free()
+        self.target=bpy.data.objects.new('Gap surface',mesh)
+        bpy.context.scene.collection.objects.link(self.target)
+        self.settings.target=self.target
+        self.settings.waypoint_mode=True
+        r=ropes.new_rope(bpy.context.scene,self.target)
+        with ropes.quiet_updates():
+            for p in ((-1,0,0),(1,0,0)):
+                a=r.ropes_rope.anchors.add()
+                a.position=p
+                a.kind='SPANNING'
+            r.ropes_rope.squish=1
+            r.ropes_rope.tension=1
+        self.assertEqual(bpy.ops.ropes.generate(),{'FINISHED'})
+        points=ropes.visible_path(r)
+        self.assertAlmostEqual(cumulative(points)[-1],2,places=4)
+        self.assertTrue(all(abs(p.y)<1e-5 for p in points))
+        self.assertFalse(ropes.PressureField(bpy.context.scene,self.target).contacts)
+        self.assertIsNone(self.target.data.shape_keys)
+        r.ropes_rope.doubled=True
+        self.assertFalse(self.settings.message,self.settings.message)
+        self.assertGreater(cumulative(ropes.visible_path(r))[-1],4)
+        self.assertIsNone(self.target.data.shape_keys)
+
+    def test_spanning_obstacle_clearance(self):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=20,ring_count=12,radius=1)
+        self.target=bpy.context.object
+        self.settings.target=self.target
+        self.settings.waypoint_mode=True
+        r=ropes.new_rope(bpy.context.scene,self.target)
+        with ropes.quiet_updates():
+            for p in ((-1,0,0),(1,0,0)):
+                a=r.ropes_rope.anchors.add()
+                a.position=p
+                a.kind='SPANNING'
+        self.assertEqual(bpy.ops.ropes.generate(),{'FINISHED'})
+        path=ropes.visible_path(r)
+        surface=Surface(self.target,0)
+        from ropes.geometry import segment_clear
+        self.assertGreater(cumulative(path)[-1],2.5)
+        self.assertTrue(all(segment_clear(surface,a,b,r.ropes_rope.radius*1.01) for a,b in zip(path,path[1:])))
+
+    def test_mixed_waypoint_rules_and_contact_mask(self):
+        r=self.rope((-1.5,0,0),(-.5,0,0),(.5,0,0),(1.5,0,0))
+        with ropes.quiet_updates():
+            r.ropes_rope.anchors[1].kind='SPANNING'
+            r.ropes_rope.anchors[2].kind='SPANNING'
+            r.ropes_rope.squish=1
+            r.ropes_rope.falloff=1
+        ropes.rebuild(bpy.context.scene,self.target)
+        self.assertEqual(json.loads(r['ropes_span_flags']),[False,True,False])
+        field=ropes.PressureField(bpy.context.scene,self.target)
+        self.assertGreater(field.value(Vector((-1,0,0))),.03)
+        self.assertLess(field.value(Vector((0,0,0))),1e-8)
+        self.assertGreater(field.value(Vector((1,0,0))),.03)
+        # One spanning end alone has ordinary surface behavior.
+        r.ropes_rope.anchors[2].kind='NORMAL'
+        self.assertEqual(json.loads(r['ropes_span_flags']),[False,False,False])
+        self.assertGreater(ropes.PressureField(bpy.context.scene,self.target).value(Vector((0,0,0))),.03)
+
+    def test_junction_knot_wraps_both_ropes_and_toggles_back(self):
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        before_a=[tuple(p) for p in ropes.visible_path(a)]
+        before_b=[tuple(p) for p in ropes.visible_path(b)]
+        station=self.settings.junctions[0].distance_b
+        ropes.knot_at(bpy.context.scene,b,station)
+        self.assertTrue(self.settings.junctions[0].is_knot)
+        self.assertGreater(len(ropes.visible_path(a)),len(before_a))
+        self.assertGreater(len(ropes.visible_path(b)),len(before_b))
+        self.assertGreater(max(abs(p.y) for p in ropes.visible_path(a)),.05)
+        self.assertGreater(max(abs(p.x) for p in ropes.visible_path(b)),.05)
+        records_a=ropes.knot_records(bpy.context.scene,a)
+        records_b=ropes.knot_records(bpy.context.scene,b)
+        self.assertNotEqual(records_a[0]['component'],records_b[0]['component'])
+        ropes.knot_at(bpy.context.scene,b,station)
+        self.assertEqual(before_a,[tuple(p) for p in ropes.visible_path(a)])
+        self.assertEqual(before_b,[tuple(p) for p in ropes.visible_path(b)])
+
+    def test_doubled_overhand_minimum_is_tighter(self):
+        r=self.rope((-1.5,0,0),(1.5,0,0))
+        r.ropes_rope.doubled=True
+        ropes.knot_at(bpy.context.scene,r,1.5)
+        points=ropes.visible_path(r)
+        width=max(p.y for p in points)-min(p.y for p in points)
+        # 0.3 used 2.1 radii for the core plus a 1.1-radius lane offset;
+        # require a substantially narrower minimum-size knot footprint.
+        previous_width=2*(2.55*2.1+1.1)*r.ropes_rope.radius
+        self.assertLess(width,previous_width*.85)
+        r.ropes_rope.knot_size=1.5
+        larger=ropes.visible_path(r)
+        self.assertGreater(max(p.y for p in larger)-min(p.y for p in larger),width)
+
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()
         for offset in (0, 5):
@@ -514,10 +642,23 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.knots[0].kind = 'FIGURE_EIGHT'
         self.settings.show_waypoints = True
         uid = r.ropes_rope.uid
+        self.settings.waypoint_mode = True
+        draft = ropes.new_rope(bpy.context.scene, self.target)
+        with ropes.quiet_updates():
+            for point, kind in [((-1, 1, 0), 'NORMAL'), ((0, 1, 0), 'SPANNING')]:
+                anchor = draft.ropes_rope.anchors.add()
+                anchor.position, anchor.kind = point, kind
+        ropes.rebuild(bpy.context.scene, self.target)
+        draft_uid = draft.ropes_rope.uid
         output = '/tmp/ropes-integration.blend'
         bpy.ops.wm.save_as_mainfile(filepath=output)
         bpy.ops.wm.open_mainfile(filepath=output)
         r = next(o for o in bpy.context.scene.objects if o.ropes_rope.uid == uid)
+        draft = next(o for o in bpy.context.scene.objects if o.ropes_rope.uid == draft_uid)
+        self.assertFalse(draft.ropes_rope.generated)
+        self.assertEqual([a.kind for a in draft.ropes_rope.anchors], ['NORMAL', 'SPANNING'])
+        self.assertFalse(draft.data.splines)
+        self.assertTrue(bpy.context.scene.ropes_settings.waypoint_mode)
         self.assertEqual(len(r.ropes_rope.anchors), 2)
         self.assertAlmostEqual(r.ropes_rope.radius, .063)
         self.assertAlmostEqual(r.ropes_rope.smoothing, .75)

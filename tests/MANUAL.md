@@ -1,9 +1,9 @@
-# Blender 4.4 viewport acceptance — version 0.3
+# Blender 4.4 viewport acceptance — version 0.4
 
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.3.0 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.4.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -49,3 +49,14 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   Confirm compression follows both runs and the fold. Disable doubling again.
 - Save/reopen with marker visibility, doubled mode and knot overrides enabled.
   Confirm those settings persist and remain editable.
+
+- Enable Waypoint Mode, place Normal and Spanning points using T, finish with Enter.
+  Confirm only markers exist until Generate Rope. Move a draft point, undo/redo,
+  change a point type in the list, save/reopen, then generate.
+- Bridge a concave gap with two Spanning points. Confirm the clear section is
+  straight, has no indentation, and stays clear when doubled or widened. Check
+  that an obstructed span detours or reports an error. Mixed Normal/Spanning
+  pairs must follow the surface and indent normally.
+- Inspect a minimum-size doubled overhand. At a junction knot, follow both ropes
+  through the shared interwoven shape; neither should continue straight beneath.
+  Swap, toggle off/on, change style, and repeat at a self-crossing.

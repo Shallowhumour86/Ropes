@@ -15,7 +15,7 @@ Path(os.environ['BLENDER_USER_EXTENSIONS']).mkdir(parents=True)
 import bpy
 import addon_utils
 
-archive = root / 'dist' / 'surface-ropes-0.3.0.zip'
+archive = root / 'dist' / 'surface-ropes-0.4.0.zip'
 result = bpy.ops.preferences.addon_install(filepath=str(archive))
 assert result == {'FINISHED'}, result
 bpy.utils.refresh_script_paths()
@@ -23,7 +23,7 @@ module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None, 'Installed module did not enable'
 assert Path(module.__file__).resolve().is_relative_to(Path(profile))
 assert module.bl_info['blender'] == (4, 4, 0)
-assert module.bl_info['version'] == (0, 3, 0)
+assert module.bl_info['version'] == (0, 4, 0)
 assert hasattr(bpy.types.Scene, 'ropes_settings')
 assert hasattr(bpy.types.Object, 'ropes_rope')
 addon_utils.disable('ropes', default_set=True)
