@@ -28,5 +28,5 @@ for owner,color in zip(owners,[(.65,.28,.08,1),(.12,.42,.65,1)]):
                         element.color=tuple(c*strength for c in color[:3])+(1,)
             obj.data.materials[0]=mat
 ''' + source[end:]
-source=source.replace("surface-ropes-0.6.0-knots.png","surface-ropes-0.6.0-junction.png")
+source=source.replace("surface-ropes-0.7.0-knots.png","surface-ropes-0.7.0-junction.png")
 exec(compile(source, str(Path(__file__).with_name('knot_gallery.py')), 'exec'))

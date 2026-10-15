@@ -7,6 +7,8 @@ rope thickness, surface clearance, and optional paired runs.
 Junction knots use independently implemented two-component torus-link curves,
 with each rope following one component. They are visual interwoven junctions;
 style selection changes the winding rather than simulating a named rope bend.
+Version 0.7 selects better-aligned overhand attachment ports and rigidly rotates
+the knot body along its attachment chord before fairing the joins.
 Version 0.6 aligns attachment tangents and relaxes shared junction curves under
 local capsule-clearance and fairness constraints; this is a geometric visual
 model rather than a physical tying simulation.

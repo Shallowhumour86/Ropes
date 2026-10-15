@@ -31,6 +31,12 @@ class Surface:
         self.faces = [tuple(v.index for v in f.verts) for f in bm.faces]
         normal_matrix=obj.matrix_world.to_3x3().inverted_safe().transposed()
         self.normals=[(normal_matrix @ v.normal).normalized() for v in bm.verts]
+        self.sharp_edges=[]
+        for edge in (bm.edges if routing else []):
+            if len(edge.link_faces)==2:
+                na,nb=[(normal_matrix @ face.normal).normalized() for face in edge.link_faces]
+                if na.dot(nb)<math.cos(math.radians(45)):
+                    self.sharp_edges.append(tuple(self.vertices[v.index] for v in edge.verts))
         self.adjacency = [[] for _ in self.vertices]
         for edge in (bm.edges if routing else []):
             a, b = (v.index for v in edge.verts)
@@ -313,6 +319,36 @@ def point_segment_distance(point, a, b):
     return (point-a-delta*t).length
 
 
+def orient_knot_body(points,center,tangent,normal,radius):
+    """Rigidly orient the knot's attachment chord along the running rope.
+
+    Roll the whole body onto its most compact surface-facing support plane.
+    This changes the actual knot orientation, not just its first few samples.
+    """
+    origin=(points[0]+points[-1])/2
+    axis=(points[-1]-points[0]).normalized()
+    up=normal-axis*normal.dot(axis)
+    if up.length<1e-8:
+        up=axis.orthogonal()
+    up.normalize()
+    across=up.cross(axis).normalized()
+    local=[Vector(((p-origin).dot(axis),(p-origin).dot(across),(p-origin).dot(up))) for p in points]
+    best=None
+    for i in range(72):
+        angle=2*math.pi*i/72
+        sine,cosine=math.sin(angle),math.cos(angle)
+        heights=[p.y*sine+p.z*cosine for p in local]
+        score=(min(heights),-max(heights))
+        if best is None or score>best[0]:
+            best=(score,sine,cosine)
+    _,sine,cosine=best
+    floor=min(p.y*sine+p.z*cosine for p in local)
+    x=tangent.normalized()
+    y=normal.cross(x).normalized()
+    z=x.cross(y).normalized()
+    return [center+x*p.x+y*(p.y*cosine-p.z*sine)+z*(p.y*sine+p.z*cosine-floor+radius*1.05) for p in local]
+
+
 def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
     """Procedural overhand/figure-eight centerlines; references in KNOT_SOURCES.md."""
     x = tangent.normalized()
@@ -327,7 +363,7 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
         # Open the outer arc to provide separate entering/exiting leads. The
         # standard trefoil/figure-eight parameterizations are cited in KNOT_SOURCES.
         for i in range(count):
-            t = math.pi/6+(5*math.pi/3)*i/(count-1)
+            t = math.radians(46.5+267*i/(count-1)) if kind=='OVERHAND' else math.pi/6+(5*math.pi/3)*i/(count-1)
             if kind == 'OVERHAND':
                 a = (2+math.cos(3*t))*math.cos(2*t)
                 b = (2+math.cos(3*t))*math.sin(2*t)
@@ -339,7 +375,7 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
                 height = 2.45+1.35*math.sin(4*t)
                 px, py = -b*.9, a*.75
             result.append(center+radius*(px*x+py*y+height*z))
-        return result
+        return orient_knot_body(result,center,x,z,radius)
     result = []
     for i in range(128):
         t = 2*math.pi*i/128
@@ -349,7 +385,7 @@ def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
     return result
 
 
-def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None):
+def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None, surface_refs=None):
     """One continuous folded rope: two runs, joined by a bight at the start."""
     lanes = [[], []]
     last_side = None
@@ -409,6 +445,24 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
                 updated.append(center)
             centers=updated+[centers[-1]]
         lanes=[[c-sign*o for c,o in zip(centers,offsets)] for sign in (1,-1)]
+    if surface_refs is not None:
+        previous_side=None
+        for i,reference in enumerate(surface_refs):
+            if reference is None:
+                previous_side=None
+                continue
+            point,tangent=reference
+            normal=surface.normal_at(point)
+            side=normal.cross(tangent)
+            if side.length<1e-8:
+                side=(lanes[1][i]-lanes[0][i]).normalized()
+            side.normalize()
+            guide=previous_side if previous_side is not None else lanes[1][i]-lanes[0][i]
+            if side.dot(guide)<0:
+                side.negate()
+            previous_side=side.copy()
+            for lane,sign in zip(lanes,(-1,1)):
+                lane[i]=surface.contact(point+side*(half*sign),radius)
     center = (lanes[0][0]+lanes[1][0])/2
     side = (lanes[0][0]-lanes[1][0])/2
     tangent = points[1]-points[0]
@@ -541,16 +595,18 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
     return result
 
 
-def fair_contact_path(surface, points, radius, amount=1, pinned=()):
+def fair_contact_path(surface, points, radius, amount=1, pinned=(), references=None):
     """Relax an offset path in free space, pushing out only on contact.
 
-    Clear chords can bridge small valleys. Convex obstacles retain contact.
-    This retains index/station correspondence and fixes the two end contacts.
+    Free/crease sections can bridge small valleys. Supplied ordinary surface
+    contacts stay fixed; their routing was already relaxed on the base mesh.
+    Index/station correspondence and span endpoint contacts are retained.
     """
     if amount <= 0 or len(points)<3:
         return points
     result=[p.copy() for p in points]
     fixed=set(pinned)|{0,len(points)-1}
+    refs=[p.copy() if p is not None else None for p in references] if references is not None else None
     for stride in (6,3,1):
         for _ in range(10):
             updated=[]
@@ -560,10 +616,16 @@ def fair_contact_path(surface, points, radius, amount=1, pinned=()):
                     continue
                 a,b=result[max(0,i-stride)],result[min(len(result)-1,i+stride)]
                 candidate=p.lerp((a+b)/2,.65*amount)
-                co,n,_=surface.project(candidate)
-                signed=(candidate-co).dot(n)
-                if signed<radius*1.05:
-                    candidate=candidate+n*(radius*1.05-signed)
+                if refs is not None and refs[i] is not None:
+                    # The surface router has already relaxed these anchors.
+                    # Repeatedly projecting an elevated sample chooses one wall
+                    # of a valley and walks away from its original contact.
+                    candidate=points[i]
+                else:
+                    co,n,_=surface.project(candidate)
+                    signed=(candidate-co).dot(n)
+                    if signed<radius*1.05:
+                        candidate=candidate+n*(radius*1.05-signed)
                 updated.append(candidate)
             result=updated
     return result
@@ -606,7 +668,7 @@ def round_bends(surface,points,radius,minimum_radius,protected=None):
         u,v=p-a,b-p
         cross=u.cross(v).length
         bend_radius=u.length*v.length*(b-a).length/(2*cross) if cross>1e-10 else 1e20
-        if bend_radius<minimum_radius:
+        if bend_radius<minimum_radius and any(point_segment_distance(p,a,b)<radius*3 for a,b in surface.sharp_edges):
             bends.append(lengths[i])
     if not bends:
         return points

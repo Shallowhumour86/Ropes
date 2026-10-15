@@ -361,6 +361,7 @@ class RopesIntegration(unittest.TestCase):
         self.assertEqual(len([o for o in bpy.context.scene.objects if o.get('ropes_helper')]), 3)
 
     def test_projected_waypoint_select_move_undo_and_redo(self):
+        self.settings.waypoint_xray = True
         r = self.rope((-1, 0, 0), (0, .6, 0), (1, 0, 0))
         self.settings.show_waypoints = True
         area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
@@ -872,6 +873,75 @@ class RopesIntegration(unittest.TestCase):
         self.assertFalse(self.settings.message,self.settings.message)
         self.assertLess(max(p.z for p in points),1.15)
         self.assertLess(cumulative(points)[-1],5)
+
+    def test_curved_normal_runs_stay_on_contact_envelope(self):
+        for shape in ('SPHERE','RIPPLED'):
+            if shape=='SPHERE':
+                bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=1)
+                self.target=bpy.context.object
+                anchors=[(1,0,0),(0,0,1)]
+            else:
+                bpy.ops.mesh.primitive_grid_add(x_subdivisions=151,y_subdivisions=15,size=4)
+                self.target=bpy.context.object
+                for v in self.target.data.vertices:
+                    v.co.z=.11*math.cos(14*v.co.x)+.05*v.co.y*v.co.y
+                self.target.data.update()
+                anchors=[(x,0,.11*math.cos(14*x)) for x in (-1.5,1.5)]
+            self.settings.target=self.target
+            self.settings.radius=.05
+            self.settings.subdivisions=0
+            surface=Surface(self.target,0)
+            self.assertFalse(surface.sharp_edges)
+            r=self.rope(*(surface.project(Vector(p))[0] for p in anchors))
+            for doubled in (False,True):
+                with self.subTest(shape=shape,doubled=doubled):
+                    r.ropes_rope.doubled=doubled
+                    points=ropes.visible_path(r)
+                    if shape=='RIPPLED':
+                        points=[p for p in points if abs(p.x)<1.2]
+                    gaps=[(p-surface.project(p)[0]).length/r.ropes_rope.radius for p in points]
+                    self.assertGreaterEqual(min(gaps),.99)
+                    # 0.6 lifted these runs to 3.7 and 5 radii on the ripple.
+                    self.assertLessEqual(max(gaps),1.2)
+                    self.assertFalse(self.settings.message,self.settings.message)
+
+            if shape=='RIPPLED':
+                r.ropes_rope.squish=.6
+                r.ropes_rope.tension=.7
+                bpy.context.view_layer.update()
+                deformed=Surface(self.target.evaluated_get(bpy.context.evaluated_depsgraph_get()),0)
+                gaps=[(p-deformed.project(p)[0]).length/r.ropes_rope.radius for p in ropes.visible_path(r) if abs(p.x)<1.2]
+                self.assertLessEqual(max(gaps),1.2)
+
+    def test_knot_body_ports_align_before_entry_fairing(self):
+        from ropes.geometry import knot_points
+        center=Vector((.4,-.2,.3))
+        tangent=Vector((.6,.8,0))
+        normal=Vector((0,0,1))
+        body=knot_points(center,tangent,normal,.05,'OVERHAND')
+        self.assertGreater((body[-1]-body[0]).normalized().dot(tangent),.9999)
+        self.assertAlmostEqual((body[-1]-body[0]).dot(normal),0,places=6)
+        # Check the actual body before the short Hermite end corrections. The
+        # old body tangents were almost perpendicular despite aligned end caps.
+        self.assertGreater((body[1]-body[0]).normalized().dot(tangent),.75)
+        self.assertGreater((body[-1]-body[-2]).normalized().dot(tangent),.75)
+
+    def test_waypoint_turn_rounds_at_surface_height(self):
+        r=self.rope((-1,0,0),(0,0,0),(0,1,0))
+        for doubled in (False,True):
+            r.ropes_rope.doubled=doubled
+            points=ropes.visible_path(r)
+            self.assertTrue(all(abs(p.z-r.ropes_rope.radius*1.05)<1e-5 for p in points))
+            radii=[]
+            for a,b,c in zip(points,points[1:],points[2:]):
+                if abs(b.x)>.4 or abs(b.y)>.4:
+                    continue
+                u,v=b-a,c-b
+                cross=u.cross(v).length
+                if cross>1e-10:
+                    radii.append(u.length*v.length*(c-a).length/(2*cross))
+            self.assertTrue(radii)
+            self.assertGreater(min(radii),r.ropes_rope.radius*1.2)
 
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()

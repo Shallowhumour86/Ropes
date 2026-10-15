@@ -80,7 +80,7 @@ scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'
 output = ROOT / 'dist'
 output.mkdir(exist_ok=True)
-scene.render.filepath = str(output / 'surface-ropes-0.6.0-preview.png')
+scene.render.filepath = str(output / 'surface-ropes-0.7.0-preview.png')
 bpy.ops.object.select_all(action='DESELECT')
 target.select_set(True)
 bpy.context.view_layer.objects.active = target
@@ -91,6 +91,6 @@ for area in bpy.context.screen.areas:
         area.spaces.active.region_3d.view_distance = 7
         area.spaces.active.region_3d.view_location = (0, 0, 0)
         area.spaces.active.show_region_ui = True
-bpy.ops.wm.save_as_mainfile(filepath=str(output / 'surface-ropes-0.6.0-demo.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=str(output / 'surface-ropes-0.7.0-demo.blend'))
 bpy.ops.render.render(write_still=True)
 print('DEMO_COMPLETE', output)

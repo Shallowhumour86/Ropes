@@ -17,5 +17,5 @@ source=source[:a]+'''for row,doubled in [(.65,False),(-.65,True)]:
             anchor.kind='SPANNING' if abs(x)<1 else 'NORMAL'
 ropes.rebuild(scene,target)
 ''' +source[b:]
-source=source.replace('surface-ropes-0.6.0-knots.png','surface-ropes-0.6.0-valleys.png')
+source=source.replace('surface-ropes-0.7.0-knots.png','surface-ropes-0.7.0-valleys.png')
 exec(compile(source,str(Path(__file__).with_name('knot_gallery.py')),'exec'))

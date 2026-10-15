@@ -1,3 +1,15 @@
+# 0.7.0
+
+- Removed broad bend-cushion lift from smooth curved surfaces; retained clearance
+  cushions at genuine hard mesh edges.
+- Retained ordinary surface contacts during offset relaxation and settled doubled
+  runs independently on smooth sections, preserving knots, crossings and spans.
+- Rounded deliberate waypoint corners along the surface without inflating height.
+- Recut compact-overhand attachment ports and rigidly reoriented whole knot bodies
+  along their attachment chord, with a compact roll and smooth entry joins.
+- Added upper contact-gap regressions on a sphere and a rippled surface, including
+  deformation; checked body orientation before the endpoint fairing correction.
+
 # 0.6.0
 
 - Added waypoint display size with a corresponding smaller pick radius.

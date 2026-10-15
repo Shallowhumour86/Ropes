@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 6, 0),
+    'version': (0, 7, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
@@ -561,7 +561,13 @@ def baseline_path(rope,surface,path):
             result.append(rope.ropes_rope.target.matrix_world @ Vector(overrides[i]))
         else:
             result.append(surface.contact(point,rope.ropes_rope.radius))
-    return fair_contact_path(surface,result,rope.ropes_rope.radius,rope.ropes_rope.smoothing)
+    references=[point if (i>=len(overrides) or overrides[i] is None) and not any(point_segment_distance(point,a,b)<rope.ropes_rope.radius*3 for a,b in surface.sharp_edges) else None for i,point in enumerate(path)]
+    lengths=cumulative(path)
+    bounds=json.loads(rope.get('ropes_leg_bounds','[]'))
+    flags=json.loads(rope.get('ropes_span_flags','[]'))
+    pins={min(len(path)-1,bisect.bisect_left(lengths,bounds[i])) for i in range(len(bounds))
+          if (i>0 and i-1<len(flags) and flags[i-1]) or (i<len(flags) and flags[i])}
+    return fair_contact_path(surface,result,rope.ropes_rope.radius,rope.ropes_rope.smoothing,pins,references)
 
 def knot_records(scene, rope):
     props=rope.ropes_rope
@@ -669,6 +675,40 @@ def support_normals(rope,surface,path,lengths,stations):
     return normals
 
 
+def fillet_surface_waypoints(rope,surface,points,stations,protected):
+    """Round a deliberate waypoint turn along a smooth surface, at contact height."""
+    result=list(points)
+    references={}
+    if rope.ropes_rope.smoothing<=0:
+        return result,references
+    bounds=json.loads(rope.get('ropes_leg_bounds','[]'))
+    flags=json.loads(rope.get('ropes_span_flags','[]'))
+    radius=rope.ropes_rope.radius
+    reach=radius*(6 if rope.ropes_rope.doubled else 4)
+    for leg,station in enumerate(bounds[1:-1],1):
+        if flags[leg-1] or flags[leg]:
+            continue
+        index=min(len(points)-2,bisect.bisect_left(stations,station))
+        if index<1 or protected[index]:
+            continue
+        incoming=points[index]-points[index-1]
+        outgoing=points[index+1]-points[index]
+        if incoming.length<1e-8 or outgoing.length<1e-8 or incoming.normalized().dot(outgoing.normalized())>math.cos(math.radians(30)):
+            continue
+        if any(point_segment_distance(points[index],a,b)<radius*3 for a,b in surface.sharp_edges):
+            continue
+        lo=max(0,bisect.bisect_left(stations,station-reach))
+        hi=min(len(points)-1,bisect.bisect_right(stations,station+reach))
+        if hi-lo<3 or any(protected[lo:hi+1]):
+            continue
+        curve=[points[lo]]+bezier_join(points[lo],points[lo+1]-points[lo],points[hi],points[hi]-points[hi-1],hi-lo)+[points[hi]]
+        for i,p in enumerate(curve,lo):
+            co=surface.project(p)[0]
+            references[i]=co
+            result[i]=surface.contact(co,radius)
+    return result,references
+
+
 def display_path(scene, rope, surface, path):
     radius = rope.ropes_rope.radius
     lengths = cumulative(path)
@@ -691,13 +731,26 @@ def display_path(scene, rope, surface, path):
     rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
     records=knot_records(scene,rope)
     protected=[any(abs(station-record['station'])<radius*14 for record in records) for station in stations]
+    rendered,fillet_refs=fillet_surface_waypoints(rope,surface,rendered,stations,protected)
+    unrounded=rendered
     rendered=round_bends(surface,rendered,radius,radius*(3.5 if rope.ropes_rope.doubled else 2),protected)
     if rope.ropes_rope.doubled:
         # Guide the bundle from its underlying route, not the nearest wall to
         # an elevated centerline: a valley has two equally near walls.
         normals=support_normals(rope,surface,path,lengths,stations)
+        surface_refs=[]
+        for i,station in enumerate(stations):
+            point,tangent=sample_at(path,lengths,station)
+            if i in fillet_refs:
+                point=fillet_refs[i]
+                tangent=rendered[min(i+1,len(rendered)-1)]-rendered[max(0,i-1)]
+                tangent=tangent.normalized() if tangent.length>1e-8 else Vector((1,0,0))
+            raised=protected[i] or (rendered[i]-unrounded[i]).length>radius*.005
+            raised=raised or any(abs(station-(j.distance_a if j.rope_a==rope and j.over_a else j.distance_b))<max(envelope_radius(rope),envelope_radius(j.rope_b if j.over_a else j.rope_a))*6 for j in junctions)
+            hard=any(point_segment_distance(point,a,b)<radius*3 for a,b in surface.sharp_edges)
+            surface_refs.append((point,tangent) if not raised and not hard and not span_at(rope,station) else None)
         rendered, stations = doubled_path(surface, rendered, stations, radius, rope.ropes_rope.double_spacing,
-                                         [span_at(rope,s) for s in stations], normals)
+                                         [span_at(rope,s) for s in stations], normals,surface_refs)
         rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
     for i,(a,b) in enumerate(zip(rendered,rendered[1:])):
         if span_at(rope,(stations[i]+stations[i+1])/2) and not segment_clear(surface,a,b,radius*1.01):

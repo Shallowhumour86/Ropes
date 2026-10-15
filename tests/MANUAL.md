@@ -1,9 +1,9 @@
-# Blender 4.4 viewport acceptance — version 0.6
+# Blender 4.4 viewport acceptance — version 0.7
 
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.6.0 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.7.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -81,3 +81,13 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   entering runs through the shared knot and inspect entry clearance from all sides.
 - On a coarse cube, inspect single/doubled turns for pinched inner tubes. On a
   coarse Suzanne and a varying-width groove, inspect doubled ropes for spikes.
+
+- Wrap a smoothly curved, dense mesh and a rippled surface with single/doubled
+  normal ropes. Inspect at grazing angles: running sections should have only the
+  rope-thickness offset. Repeat with compression; spans and over-crossings should
+  keep their intended clearance. Check that hard cube corners still round safely.
+- Make a deliberate right-angle waypoint turn on a flat mesh. The turn should be
+  rounded in the plane, with no height step or floating cushion.
+- Inspect compact-overhand bodies from above and from the side: entry/exit ports
+  should align with the running rope after rotating the whole body. Repeat after
+  moving the knot and on a doubled rope.

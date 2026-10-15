@@ -1,4 +1,4 @@
-# Surface Ropes 0.6.0 — Blender 4.4
+# Surface Ropes 0.7.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.6.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.6.0.zip).
+[Download version 0.7.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.7.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,24 +23,24 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.6.0
+## New in 0.7.0
 
-- **Waypoint Size** changes marker size and its click target together. Smaller
-  markers make closely spaced points easier to place.
-- **Waypoints Through Objects** controls both visibility and picking through
-  solid geometry. It is **off by default**. Display changes do not reroute ropes.
-- **Edit Waypoint Draft** returns an existing rope to markers for deferred editing.
-  Finish your edits and use **Generate Rope** to rebuild it. Manual knots and
-  identifiable crossing choices are retained, including across save/reload.
-- Tighter shared junction knots, straight attachment tangents, and coupled
-  contact relaxation for their entering ropes.
-- Bounded doubled-run contact corrections and joint path relaxation replace the
-  unstable clearance calculation at narrow valleys. Local clearance cushions
-  round sharp bends so the rope's inner side does not fold into itself.
+- Normal single and doubled runs stay on the surface contact envelope across
+  smooth curved geometry. Each doubled run settles onto its own contact surface.
+- The extra bend cushion is restricted to actual hard mesh edges (45 degrees or
+  sharper), instead of being added across ordinary curved surfaces.
+- Deliberate waypoint turns are rounded along the surface, without lifting them.
+  Free spans, over/under arches and knot geometry retain their intended clearance.
+- Compact-overhand attachment ports are cut at a better-aligned part of the curve.
+  The whole knot body is rigidly reoriented along its entry/exit chord and rolled
+  into a compact surface-facing pose. The short entry joins are then smoothed.
 
-[Knot comparison](dist/surface-ropes-0.6.0-knots.png) ·
-[Shared doubled junction](dist/surface-ropes-0.6.0-junction.png) ·
-[Coarse valley comparison](dist/surface-ropes-0.6.0-valley-regression.png)
+[Surface contact: 0.6.0 versus 0.7.0](dist/surface-ropes-0.7.0-contact.png) ·
+[Reoriented knot bodies](dist/surface-ropes-0.7.0-knots.png)
+
+Install the ZIP and click **Rebuild Ropes** to update existing rope geometry.
+Waypoint Size, waypoint depth visibility, deferred draft editing, spanning types,
+shared junctions and all other controls from 0.6.0 remain available.
 
 ## Plan with waypoints
 
@@ -217,12 +217,13 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 43 integration checks cover routing, flat/curved smoothing, independent
+The 46 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
 marker size/depth picking, generated-rope draft editing/persistence, coarse
-valleys, cube-corner bend radii, knot tangents and junction entry clearance, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0 and 0.5.0
+valleys, cube-corner bend radii, bounded contact gaps on curved surfaces, knot
+body orientation, knot tangents and junction entry clearance, and
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0, 0.5.0 and 0.6.0
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.
