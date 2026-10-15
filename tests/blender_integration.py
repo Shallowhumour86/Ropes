@@ -35,6 +35,8 @@ class RopesIntegration(unittest.TestCase):
         self.settings.squish = 0
         self.settings.tension = .5
         self.settings.smoothing = 1
+        self.settings.waypoint_xray=False
+        self.settings.waypoint_size=.6
         self.settings.show_waypoints = False
         self.settings.waypoint_mode = False
         self.settings.placement_kind = 'NORMAL'
@@ -345,7 +347,7 @@ class RopesIntegration(unittest.TestCase):
         self.settings.show_waypoints = True
         markers = [o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]
         self.assertEqual(len(markers), 3)
-        self.assertTrue(all(o.hide_render and o.show_in_front for o in markers))
+        self.assertTrue(all(o.hide_render and not o.show_in_front for o in markers))
         original = ropes.capture_state(bpy.context.scene, self.target, r)
         ropes.move_waypoint(bpy.context.scene, r, 1, (0, -.7, .8))
         self.assertLess((Vector(r.ropes_rope.anchors[1].position)-Vector((0, -.7, 0))).length, 1e-5)
@@ -708,6 +710,168 @@ class RopesIntegration(unittest.TestCase):
             ropes.move_waypoint(bpy.context.scene,operator.rope,1,Vector((0,.5,0)))
             self.assertEqual(len([o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]),3)
         self.assertEqual(before,[tuple(p) for p in ropes.visible_path(existing)])
+
+    def test_waypoint_size_pick_radius_and_solid_occlusion(self):
+        r=self.rope((-1,0,0),(0,0,0),(1,0,0))
+        self.settings.show_waypoints=True
+        marker=next(o for o in bpy.context.scene.objects if o.get('ropes_waypoint')==1)
+        previous=marker.empty_display_size
+        self.settings.waypoint_size=.05
+        self.assertLess(marker.empty_display_size,previous/5)
+        area=next(a for a in bpy.context.screen.areas if a.type=='VIEW_3D')
+        region=next(r for r in area.regions if r.type=='WINDOW')
+        rv3d=area.spaces.active.region_3d
+        pixel=view3d_utils.location_3d_to_region_2d(region,rv3d,marker.matrix_world.translation)
+        event=SimpleNamespace(mouse_x=pixel.x+region.x+12,mouse_y=pixel.y+region.y)
+        self.assertIsNone(ropes.pick_waypoint(bpy.context,event,self.target,region,rv3d))
+        origin=view3d_utils.region_2d_to_origin_3d(region,rv3d,pixel)
+        position=origin.lerp(marker.matrix_world.translation,.75)
+        bpy.ops.mesh.primitive_cube_add(size=.4,location=position)
+        bpy.context.view_layer.update()
+        event.mouse_x=pixel.x+region.x
+        self.assertIsNone(ropes.pick_waypoint(bpy.context,event,self.target,region,rv3d))
+        self.settings.waypoint_xray=True
+        self.assertTrue(marker.show_in_front)
+        self.assertEqual(ropes.pick_waypoint(bpy.context,event,self.target,region,rv3d),(r.ropes_rope.uid,1))
+
+    def test_generated_rope_returns_to_draft_and_regenerates_choices(self):
+        a=self.rope((-1.5,0,0),(0,0,0),(1.5,0,0))
+        ropes.knot_at(bpy.context.scene,a,.6)
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        j=self.settings.junctions[0]
+        j.is_knot=True
+        j.over_a=False
+        self.settings.active_rope=a
+        self.assertEqual(bpy.ops.ropes.edit_waypoints(),{'FINISHED'})
+        self.assertFalse(a.ropes_rope.generated)
+        self.assertFalse(a.data.splines)
+        self.assertTrue(self.settings.waypoint_mode)
+        uid=a.ropes_rope.uid
+        bpy.ops.wm.save_as_mainfile(filepath='/tmp/ropes-draft-edit.blend')
+        bpy.ops.wm.open_mainfile(filepath='/tmp/ropes-draft-edit.blend')
+        self.settings=bpy.context.scene.ropes_settings
+        a=next(o for o in bpy.context.scene.objects if o.ropes_rope.uid==uid)
+        self.assertTrue(a.get('ropes_draft_source'))
+        with patch.object(ropes,'rebuild',side_effect=AssertionError('Draft rebuilt')), \
+             patch.object(ropes,'Surface',side_effect=AssertionError('Draft routed')):
+            ropes.move_waypoint(bpy.context.scene,a,1,(0,.2,0))
+            anchor=a.ropes_rope.anchors.add()
+            anchor.position=(1.7,.4,0)
+            ropes.refresh_draft_markers(bpy.context.scene,a)
+        self.assertEqual(bpy.ops.ropes.generate(),{'FINISHED'})
+        self.assertTrue(a.ropes_rope.generated)
+        self.assertEqual(len(a.ropes_rope.anchors),4)
+        self.assertEqual(len(a.ropes_rope.knots),1)
+        self.assertAlmostEqual(a.ropes_rope.knots[0].distance,.6*math.sqrt(1.5**2+.2**2)/1.5,delta=.005)
+        self.assertEqual(len(self.settings.junctions),1)
+        self.assertTrue(self.settings.junctions[0].is_knot)
+        self.assertFalse(self.settings.junctions[0].over_a)
+
+    def test_doubled_variable_width_coarse_valley_has_no_spikes(self):
+        xs=[-1.5+i*.1 for i in range(31)]
+        ys=[-.5,-.12,0,.12,.5]
+        vertices=[(x,y,(.25+.18*math.cos(x*6))*min(1,abs(y)/.12)) for x in xs for y in ys]
+        faces=[(i*5+j,(i+1)*5+j,(i+1)*5+j+1,i*5+j+1) for i in range(30) for j in range(4)]
+        mesh=bpy.data.meshes.new('Variable groove')
+        mesh.from_pydata(vertices,[],faces)
+        self.target=bpy.data.objects.new('Variable groove',mesh)
+        bpy.context.scene.collection.objects.link(self.target)
+        self.settings.target=self.target
+        self.settings.subdivisions=0
+        r=self.rope((-1.4,0,0),(1.4,0,0))
+        r.ropes_rope.doubled=True
+        points=ropes.visible_path(r)
+        self.assertFalse(self.settings.message,self.settings.message)
+        self.assertLess(max(p.z for p in points),.32)
+        self.assertLess(cumulative(points)[-1],7)
+        self.assertEqual(len(self.settings.junctions),0)
+        # No local vertical excursions larger than one rope diameter.
+        self.assertLess(max(abs(a.z-b.z) for a,b in zip(points,points[1:])),r.ropes_rope.radius*2)
+
+    def test_knot_entry_tangents_and_compact_shared_core(self):
+        from ropes.geometry import knot_points,align_knot_entries,junction_points
+        tangent=Vector((1,0,0))
+        normal=Vector((0,0,1))
+        for kind in ('OVERHAND','FIGURE_EIGHT'):
+            core=align_knot_entries(knot_points(Vector(),tangent,normal,.05,kind),tangent)
+            self.assertGreater((core[1]-core[0]).normalized().dot(tangent),.98)
+            self.assertGreater((core[-1]-core[-2]).normalized().dot(tangent),.98)
+        normal_core=knot_points(Vector(),tangent,normal,.05,'OVERHAND')
+        for bundle in (1,2.01):
+            core=junction_points(Vector(),tangent,tangent,normal,.05,.05,0,'OVERHAND',bundle=bundle)
+            # Old doubled junction used full-envelope major/minor: 7.6 radii.
+            self.assertLess(max(p.length for p in core),.05*7)
+            radial=[math.hypot(p.x,p.y) for p in core]
+            self.assertLess(min(radial),.05*1.1)
+
+    def test_junction_entries_clear_other_core_single_and_doubled(self):
+        from ropes.geometry import point_segment_distance
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        for doubled in (False,True):
+            with ropes.quiet_updates():
+                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+            ropes.rebuild(bpy.context.scene,self.target)
+            self.settings.junctions[0].is_knot=True
+            ropes.rebuild(bpy.context.scene,self.target,repath=False)
+            for lead,other in ((a,b),(b,a)):
+                points=ropes.visible_path(lead)
+                stations=json.loads(lead['ropes_stations'])
+                body=ropes.visible_path(other)
+                body_stations=json.loads(other['ropes_stations'])
+                ca=ropes.knot_records(bpy.context.scene,lead)[0]['station']
+                cb=ropes.knot_records(bpy.context.scene,other)[0]['station']
+                segments=[(p,q) for i,(p,q) in enumerate(zip(body,body[1:])) if abs(body_stations[i]-cb)<1e-6 and abs(body_stations[i+1]-cb)<1e-6]
+                for point,station in zip(points,stations):
+                    if 1e-5<abs(station-ca)<lead.ropes_rope.radius*10:
+                        gap=min(point_segment_distance(point,p,q) for p,q in segments)
+                        self.assertGreaterEqual(gap,lead.ropes_rope.radius*1.95)
+
+    def test_sharp_cube_corner_rounds_beyond_rope_thickness(self):
+        bpy.ops.mesh.primitive_cube_add(size=2)
+        self.target=bpy.context.object
+        self.settings.target=self.target
+        self.settings.radius=.05
+        r=self.rope((-.7,0,1),(1,0,.7),(1,0,-.7))
+        for doubled in (False,True):
+            r.ropes_rope.doubled=doubled
+            points=ropes.visible_path(r)
+            radii=[]
+            for a,b,c in zip(points,points[1:],points[2:]):
+                if b.x<.8 or b.z<.8:
+                    continue
+                u,v=b-a,c-b
+                cross=u.cross(v).length
+                if cross>1e-10:
+                    radii.append(u.length*v.length*(c-a).length/(2*cross))
+            self.assertTrue(radii)
+            self.assertGreater(min(radii),r.ropes_rope.radius*1.8)
+
+        # A distant knot must not disable corner rounding on the rest of a rope.
+        ropes.knot_at(bpy.context.scene,r,.25)
+        points=ropes.visible_path(r)
+        radii=[]
+        for a,b,c in zip(points,points[1:],points[2:]):
+            if b.x<.8 or b.z<.8:
+                continue
+            u,v=b-a,c-b
+            cross=u.cross(v).length
+            if cross>1e-10:
+                radii.append(u.length*v.length*(c-a).length/(2*cross))
+        self.assertGreater(min(radii),r.ropes_rope.radius*1.8)
+
+    def test_coarse_monkey_doubled_route_has_no_large_excursions(self):
+        bpy.ops.mesh.primitive_monkey_add()
+        self.target=bpy.context.object
+        self.settings.target=self.target
+        self.settings.subdivisions=0
+        surface=Surface(self.target,0)
+        r=self.rope(surface.project(Vector((-.85,0,.8)))[0],surface.project(Vector((.85,0,.8)))[0])
+        r.ropes_rope.doubled=True
+        points=ropes.visible_path(r)
+        self.assertFalse(self.settings.message,self.settings.message)
+        self.assertLess(max(p.z for p in points),1.15)
+        self.assertLess(cumulative(points)[-1],5)
 
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()

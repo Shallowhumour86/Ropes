@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 5, 0),
+    'version': (0, 6, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw ropes on a mesh, create crossings and knots, and indent the surface',
@@ -14,6 +14,7 @@ import bisect
 import math
 import uuid
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import bpy
 from bpy.app.handlers import persistent
@@ -31,7 +32,7 @@ importlib.invalidate_caches()
 importlib.reload(_geometry)
 
 from .geometry import (Surface, cumulative, crossings, knot_points,
-                       point_segment_distance, sample_at, resample, three_strands, strand_tube, doubled_path, bezier_join, spanning_route, segment_clear, junction_points, fair_contact_path)
+                       point_segment_distance, sample_at, resample, three_strands, strand_tube, doubled_path, bezier_join, spanning_route, segment_clear, junction_points, fair_contact_path, contact_correction, round_bends, align_knot_entries)
 
 
 _UPDATING = 0
@@ -128,6 +129,21 @@ def waypoint_visibility_update(self, context):
             context.scene.ropes_settings.message = str(exc)
 
 
+def waypoint_display_update(self,context):
+    if _UPDATING or context is None:
+        return
+    owners={r.ropes_rope.uid:r for r in context.scene.objects if r.type=='CURVE' and r.ropes_rope.enabled and r.ropes_rope.target}
+    for marker in context.scene.objects:
+        if 'ropes_waypoint' not in marker:
+            continue
+        rope=owners.get(marker.get('ropes_owner'))
+        if rope is None:
+            continue
+        scale=max(abs(sum(rope.ropes_rope.target.matrix_world.to_scale())/3),1e-6)
+        marker.empty_display_size=max(rope.ropes_rope.radius*.85,.015)*self.waypoint_size/scale
+        marker.show_in_front=self.waypoint_xray
+
+
 WAYPOINT_TYPES = (
     ('NORMAL', 'Normal', 'Follow the surface to neighboring points'),
     ('SPANNING', 'Spanning', 'Bridge only when both endpoints are spanning points'),
@@ -208,6 +224,8 @@ class ROPES_PG_Settings(bpy.types.PropertyGroup):
     waypoint_mode: BoolProperty(name='Waypoint Mode', default=False, description='Place a draft first, then use Generate Rope')
     placement_kind: EnumProperty(name='New Waypoint Type', items=WAYPOINT_TYPES, default='NORMAL')
     show_waypoints: BoolProperty(name='Show Waypoints', default=False, update=waypoint_visibility_update)
+    waypoint_size: FloatProperty(name='Waypoint Size',default=.6,min=.05,max=4,update=waypoint_display_update)
+    waypoint_xray: BoolProperty(name='Waypoints Through Objects',default=False,update=waypoint_display_update)
     knot_type: EnumProperty(name='Default Knot Type', items=KNOT_TYPES, default='OVERHAND')
     knot_size: FloatProperty(name='Knot Size', default=1, min=1, max=2)
     doubled: BoolProperty(name='Doubled Rope', default=False)
@@ -253,6 +271,8 @@ def migrate_on_load(_):
             for obj in scene.objects:
                 if obj.type == 'CURVE' and obj.ropes_rope.enabled:
                     migrate_rope(scene, obj)
+    for scene in bpy.data.scenes:
+        waypoint_display_update(scene.ropes_settings,SimpleNamespace(scene=scene))
 
 
 
@@ -574,7 +594,7 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
         joint=record['junction']
         body_radius=compact*props.knot_size
         if joint:
-            body_radius=max(envelope_radius(joint.rope_a),envelope_radius(joint.rope_b))*max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size)
+            body_radius=max(joint.rope_a.ropes_rope.radius,joint.rope_b.ropes_rope.radius)*1.4*max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size)
         station = max(0, min(lengths[-1], station))
         lead_span=body_radius*(4.5 if props.doubled and kind=="OVERHAND" else 6)
         low, high = max(0, station-lead_span), min(lengths[-1], station+lead_span)
@@ -597,13 +617,15 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             floating=span_at(joint.rope_a,joint.distance_a) or span_at(joint.rope_b,joint.distance_b)
             center=world-normal*max(joint.rope_a.ropes_rope.radius,joint.rope_b.ropes_rope.radius)*1.05 if floating else nearest
             frame=sample_at(rest_path(joint.rope_a),cumulative(rest_path(joint.rope_a)),joint.distance_a)[1]
-            loop=junction_points(center,frame,tangent,normal,envelope_radius(joint.rope_a),
-                                 envelope_radius(joint.rope_b),record['component'],kind,
-                                 max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size))
+            loop=junction_points(center,frame,tangent,normal,joint.rope_a.ropes_rope.radius,
+                                 joint.rope_b.ropes_rope.radius,record['component'],kind,
+                                 max(joint.rope_a.ropes_rope.knot_size,joint.rope_b.ropes_rope.knot_size),
+                                 max(envelope_radius(joint.rope_a)/joint.rope_a.ropes_rope.radius,envelope_radius(joint.rope_b)/joint.rope_b.ropes_rope.radius))
         elif kind == 'TREFOIL':
             loop = knot_points(center+normal*radius, tangent, normal, body_radius*1.5, kind)
         else:
             loop = knot_points(center, tangent, normal, body_radius, kind)
+        loop=align_knot_entries(loop,tangent)
         incoming = bezier_join(result[-1], sample_at(path, lengths, low)[1],
                                 loop[0], loop[1]-loop[0])
         result.extend(incoming)
@@ -627,17 +649,7 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
 
 
 def clearance(surface, points, radius, free=None):
-    result = []
-    for i,point in enumerate(points):
-        nearest, normal, _ = surface.project(point)
-        floating=free is not None and free[i]
-        signed=(point-nearest).dot(normal)
-        blocked=(point-nearest).length < radius*1.05 or (surface.closed and signed < 0) if floating else signed < radius*1.05
-        if blocked:
-            direction=normal if not floating or surface.closed else (point-nearest).normalized()
-            point=nearest+direction*radius*1.05
-        result.append(point)
-    return result
+    return [point+contact_correction(surface,point,radius) for point in points]
 
 
 def support_normals(rope,surface,path,lengths,stations):
@@ -677,6 +689,9 @@ def display_path(scene, rope, surface, path):
     rendered, stations = insert_knots(scene, surface, path, lengths, rendered,
                                       knot_records(scene, rope), rope)
     rendered = clearance(surface, rendered, radius, [span_at(rope,s) for s in stations])
+    records=knot_records(scene,rope)
+    protected=[any(abs(station-record['station'])<radius*14 for record in records) for station in stations]
+    rendered=round_bends(surface,rendered,radius,radius*(3.5 if rope.ropes_rope.doubled else 2),protected)
     if rope.ropes_rope.doubled:
         # Guide the bundle from its underlying route, not the nearest wall to
         # an elevated centerline: a valley has two equally near walls.
@@ -690,10 +705,85 @@ def display_path(scene, rope, surface, path):
     return rendered, stations
 
 
+def separate_knot_leads(scene,target,surface,displays):
+    """Coupled capsule constraints keep junction entries outside both knot cores."""
+    owners={r.name:r for r in rope_objects(scene,target) if r.name in displays}
+    records={name:[r for r in knot_records(scene,owner) if r['junction']] for name,owner in owners.items()}
+    if not any(records.values()):
+        return
+    masks={name:[i not in (0,len(points)-1) and any(abs(station-r['station'])<owners[name].ropes_rope.radius*14 for r in records[name])
+                 for i,station in enumerate(stations)] for name,(points,stations) in displays.items()}
+    for iteration in range(64):
+        trees={}
+        lengths={}
+        for name,(points,stations) in displays.items():
+            tree=KDTree(len(points))
+            for i,p in enumerate(points):
+                tree.insert(p,i)
+            tree.balance()
+            trees[name]=tree
+            lengths[name]=cumulative(points)
+        maximum=0
+        for name,(points,stations) in displays.items():
+            radius=owners[name].ropes_rope.radius
+            for i in range(1,len(points)-1):
+                if not masks[name][i]:
+                    continue
+                for other,(body,body_stations) in displays.items():
+                    if other!=name and not any(other in (r['junction'].rope_a.name,r['junction'].rope_b.name) for r in records[name]):
+                        continue
+                    goal=(radius+owners[other].ropes_rope.radius)*1.08
+                    candidates=set()
+                    for _,j,_ in trees[other].find_range(points[i],goal*1.6):
+                        candidates.update((max(0,j-1),min(len(body)-2,j)))
+                    closest=None
+                    for j in candidates:
+                        if other==name and min(abs(lengths[name][i]-lengths[other][j]),abs(lengths[name][i]-lengths[other][j+1]))<goal*2.2:
+                            continue
+                        a,b=body[j],body[j+1]
+                        delta=b-a
+                        t=max(0,min(1,(points[i]-a).dot(delta)/delta.length_squared)) if delta.length_squared else 0
+                        separation=points[i]-a-delta*t
+                        gap=separation.length
+                        if gap<goal and (closest is None or gap<closest[0]):
+                            closest=(gap,j,t,separation)
+                    if closest is None:
+                        continue
+                    gap,j,t,separation=closest
+                    maximum=max(maximum,goal-gap)
+                    direction=separation.normalized() if gap>1e-8 else surface.normal_at(points[i])
+                    wa=1.0 if masks[other][j] else 0.0
+                    wb=1.0 if masks[other][j+1] else 0.0
+                    denominator=1+wa*(1-t)**2+wb*t*t
+                    correction=direction*min(radius*.3,(goal-gap)/denominator)
+                    points[i]+=correction
+                    if wa:
+                        body[j]-=correction*((1-t)*wa)
+                    if wb:
+                        body[j+1]-=correction*(t*wb)
+        for name,(points,stations) in displays.items():
+            radius=owners[name].ropes_rope.radius
+            arc=cumulative(points)
+            relaxed=list(points)
+            for i in range(1,len(points)-1):
+                if not masks[name][i]:
+                    continue
+                candidate=points[i]
+                if iteration<36:
+                    left=sample_at(points,arc,max(0,arc[i]-radius*.7))[0]
+                    right=sample_at(points,arc,min(arc[-1],arc[i]+radius*.7))[0]
+                    candidate=candidate.lerp((left+right)/2,.2)
+                relaxed[i]=candidate+contact_correction(surface,candidate,radius)
+            displays[name]=(relaxed,stations)
+        if iteration>=36 and maximum<min(r.ropes_rope.radius for r in owners.values())*.002:
+            break
+
+
 def render_ropes(scene, target, surface, ropes, paths):
     settings = scene.ropes_settings
     displays = {rope.name: display_path(scene, rope, surface, paths[rope.name])
                 for rope in ropes if rope.name in paths}
+    separate_knot_leads(scene,target,surface,displays)
     pressure = PressureField(scene, target, surface, displays)
     helpers = {(o.get('ropes_owner'), o.get('ropes_strand')): o for o in scene.objects
                if o.get('ropes_helper') and o.parent == target}
@@ -702,8 +792,11 @@ def render_ropes(scene, target, surface, ropes, paths):
         radius = rope.ropes_rope.radius
         if rope.name not in displays:
             set_curve(rope, [], radius)
+            rope['ropes_contact_path']='[]'
             continue
         physical, stations = displays[rope.name]
+        inverse=target.matrix_world.inverted_safe()
+        rope['ropes_contact_path']=json.dumps([list(inverse @ p) for p in physical])
         rendered = []
         route=paths[rope.name]
         normals=support_normals(rope,surface,route,cumulative(route),stations)
@@ -745,7 +838,13 @@ class PressureField:
             path = rest_path(rope)
             if depth <= 0 or len(path) < 2 or not props.generated:
                 continue
-            physical,stations=displays[rope.name] if displays is not None else display_path(scene,rope,surface,path)
+            if displays is not None:
+                physical,stations=displays[rope.name]
+            elif rope.get('ropes_contact_path') and json.loads(rope['ropes_contact_path']):
+                physical=[target.matrix_world @ Vector(p) for p in json.loads(rope['ropes_contact_path'])]
+                stations=json.loads(rope['ropes_stations'])
+            else:
+                physical,stations=display_path(scene,rope,surface,path)
             width=props.radius*props.falloff
             segments=[]
             mappings=[]
@@ -794,8 +893,8 @@ def refresh_draft_markers(scene, rope, index=None):
             marker.matrix_parent_inverse=Matrix.Identity(4)
         marker.location=anchor.position
         marker.empty_display_type='CUBE' if anchor.kind=='SPANNING' else 'SPHERE'
-        marker.empty_display_size=max(props.radius*.85,.015)/scale
-        marker.show_in_front=True
+        marker.empty_display_size=max(props.radius*.85,.015)*scene.ropes_settings.waypoint_size/scale
+        marker.show_in_front=scene.ropes_settings.waypoint_xray
         marker.hide_render=True
         marker['ropes_generated']=True
         marker['ropes_owner']=props.uid
@@ -828,8 +927,8 @@ def refresh_markers(scene, target, surface=None, pressure=None):
                 marker.location = inverse @ (point-normal*(pressure.value(point) if rope.ropes_rope.generated else 0))
                 marker.empty_display_type = 'CUBE' if anchor.kind=='SPANNING' else 'SPHERE'
                 marker.name=f'Ropes WP {rope.ropes_rope.uid} {index}'
-                marker.empty_display_size = max(radius*.85, .015)/scale
-                marker.show_in_front = True
+                marker.empty_display_size = max(radius*.85, .015)*scene.ropes_settings.waypoint_size/scale
+                marker.show_in_front = scene.ropes_settings.waypoint_xray
                 marker.show_name = False
                 marker.hide_render = True
                 marker['ropes_generated'] = True
@@ -840,6 +939,16 @@ def refresh_markers(scene, target, surface=None, pressure=None):
         if marker not in used:
             bpy.data.objects.remove(marker, do_unlink=True)
     bpy.context.view_layer.update()
+
+
+def waypoint_visible(context,region,rv3d,marker,pixel):
+    origin=view3d_utils.region_2d_to_origin_3d(region,rv3d,pixel)
+    delta=marker.matrix_world.translation-origin
+    if delta.length<1e-8:
+        return True
+    tolerance=max(marker.empty_display_size*.2,1e-4)
+    hit,position,_,_,_,_=context.scene.ray_cast(bpy.context.evaluated_depsgraph_get(),origin,delta.normalized(),distance=max(0,delta.length-tolerance))
+    return not hit
 
 
 def pick_waypoint(context, event, target, region, rv3d):
@@ -854,8 +963,10 @@ def pick_waypoint(context, event, target, region, rv3d):
         world_radius = marker.empty_display_size*max(marker.matrix_world.to_scale())
         edge = view3d_utils.location_3d_to_region_2d(region, rv3d,
                marker.matrix_world.translation+rv3d.view_rotation @ Vector((world_radius, 0, 0)))
-        threshold = max(18, (edge-pixel).length+5) if edge is not None else 18
+        threshold = max(2, (edge-pixel).length+2) if edge is not None else 2
         if (pixel-mouse).length < min(distance, threshold):
+            if not context.scene.ropes_settings.waypoint_xray and not waypoint_visible(context,region,rv3d,marker,pixel):
+                continue
             distance = (pixel-mouse).length
             best = marker['ropes_owner'], marker['ropes_waypoint']
     return best
@@ -1022,6 +1133,7 @@ def capture_state(scene, target, current_rope=None, drafts_only=False):
                            order=rope.ropes_rope.order,
                            anchors=[dict(position=tuple(a.position),kind=a.kind) for a in rope.ropes_rope.anchors],
                            generated=rope.ropes_rope.generated,
+                           draft_source=rope.get('ropes_draft_source',''),
                            knots=[dict(distance=k.distance, kind=k.kind) for k in rope.ropes_rope.knots],
                            props={name: getattr(rope.ropes_rope, name) for name in COPY_SETTINGS},
                            path=rope.get('ropes_path', '[]'), legs=rope.get('ropes_leg_bounds', '[]'), spans=rope.get('ropes_span_flags','[]'), centers=rope.get('ropes_span_centers','[]')))
@@ -1068,6 +1180,7 @@ def restore_state(scene, target, state):
             props.anchors.clear()
             props.knots.clear()
             props.generated=record['generated']
+            rope['ropes_draft_source']=record.get('draft_source','')
             for point in record['anchors']:
                 anchor=props.anchors.add()
                 anchor.position,anchor.kind=point['position'],point['kind']
@@ -1152,6 +1265,14 @@ class ROPES_OT_Draw(bpy.types.Operator):
         self.rope = settings.active_rope if self.extend else None
         if self.rope and (not self.rope.ropes_rope.enabled or self.rope.ropes_rope.target != target):
             self.rope = None
+        if self.rope and self.rope.ropes_rope.generated and settings.waypoint_mode:
+            before=capture_state(context.scene,target,self.rope)
+            try:
+                begin_waypoint_draft(context.scene,self.rope)
+            except (ValueError,RuntimeError) as exc:
+                self.report({'ERROR'},str(exc))
+                return {'CANCELLED'}
+            self.undo_history.append(before)
         context.window_manager.modal_handler_add(self)
         context.area.header_text_set('Ropes: LMB add point · N new rope · W waypoints · T point type · RMB on rope knot/crossing · Enter/Esc finish · Ctrl+Z / Backspace undo · Ctrl+Shift+Z redo')
         return {'RUNNING_MODAL'}
@@ -1342,6 +1463,57 @@ class ROPES_OT_SelectRope(bpy.types.Operator):
 
 
 
+def begin_waypoint_draft(scene,rope):
+    if not rope.ropes_rope.generated:
+        return
+    target=rope.ropes_rope.target
+    source=capture_state(scene,target,rope)
+    uid=rope.ropes_rope.uid
+    pending=dict(ropes=[r for r in source['ropes'] if r['uid']==uid],junctions=[j for j in source['junctions'] if uid in (j['a'],j['b'])])
+    rope['ropes_draft_source']=json.dumps(pending)
+    rope.ropes_rope.generated=False
+    try:
+        rebuild(scene,target,repath=False)
+    except (ValueError,RuntimeError):
+        restore_state(scene,target,source)
+        raise
+
+
+def restore_draft_junctions(scene,rope,source):
+    owners={r.ropes_rope.uid:r for r in rope_objects(scene,rope.ropes_rope.target)}
+    present={j.uid for j in scene.ropes_settings.junctions}
+    with quiet_updates():
+        for record in source.get('junctions',[]):
+            if record['uid'] in present or record['a'] not in owners or record['b'] not in owners:
+                continue
+            if rope.ropes_rope.uid not in (record['a'],record['b']):
+                continue
+            j=scene.ropes_settings.junctions.add()
+            j.rope_a,j.rope_b=owners[record['a']],owners[record['b']]
+            j.position=record['position']
+            j.distance_a,j.distance_b=record['sa'],record['sb']
+            j.is_knot,j.over_a,j.uid,j.kind=record['knot'],record['over_a'],record['uid'],record['kind']
+
+
+class ROPES_OT_EditWaypoints(bpy.types.Operator):
+    bl_idname='ropes.edit_waypoints'
+    bl_label='Edit Waypoint Draft'
+    bl_description='Return this rope to editable waypoints; Generate Rope applies the new plan'
+    bl_options={'REGISTER','UNDO'}
+
+    def execute(self,context):
+        rope=context.scene.ropes_settings.active_rope
+        if not rope:
+            return {'CANCELLED'}
+        try:
+            begin_waypoint_draft(context.scene,rope)
+        except (ValueError,RuntimeError) as exc:
+            self.report({'ERROR'},str(exc))
+            return {'CANCELLED'}
+        context.scene.ropes_settings.waypoint_mode=True
+        return {'FINISHED'}
+
+
 class ROPES_OT_Generate(bpy.types.Operator):
     bl_idname='ropes.generate'
     bl_label='Generate Rope'
@@ -1356,8 +1528,22 @@ class ROPES_OT_Generate(bpy.types.Operator):
         target=rope.ropes_rope.target
         state=capture_state(context.scene,target,rope)
         rope.ropes_rope.generated=True
+        source=json.loads(rope.get('ropes_draft_source') or '{}')
         try:
+            restore_draft_junctions(context.scene,rope,source)
             rebuild(context.scene,target)
+            old=next((r for r in source.get('ropes',[]) if r['uid']==rope.ropes_rope.uid),None)
+            if old and old['knots']:
+                previous=json.loads(old['legs'])
+                current=json.loads(rope['ropes_leg_bounds'])
+                for knot,record in zip(rope.ropes_rope.knots,old['knots']):
+                    leg=max(0,min(len(previous)-2,bisect.bisect_right(previous,record['distance'])-1))
+                    fraction=(record['distance']-previous[leg])/max(1e-9,previous[leg+1]-previous[leg])
+                    leg=min(leg,len(current)-2)
+                    knot.distance=current[leg]+fraction*(current[leg+1]-current[leg])
+                refresh_render(context.scene,target)
+            if 'ropes_draft_source' in rope:
+                del rope['ropes_draft_source']
         except (ValueError,RuntimeError) as exc:
             restore_state(context.scene,target,state)
             self.report({'ERROR'},str(exc))
@@ -1417,6 +1603,8 @@ class ROPES_PT_Panel(bpy.types.Panel):
         layout.prop(settings, 'target', text='Surface')
         layout.operator('ropes.use_selected', icon='EYEDROPPER')
         layout.prop(settings, 'show_waypoints')
+        layout.prop(settings, 'waypoint_size')
+        layout.prop(settings, 'waypoint_xray')
         layout.prop(settings, 'waypoint_mode')
         layout.prop(settings, 'placement_kind')
         layout.operator('ropes.draw', text='Draw New Rope', icon='CURVE_DATA').extend = False
@@ -1432,6 +1620,8 @@ class ROPES_PT_Panel(bpy.types.Panel):
                 box.prop(props.anchors[props.active_anchor],'kind')
             if not props.generated:
                 box.operator('ropes.generate',icon='CURVE_DATA')
+            else:
+                box.operator('ropes.edit_waypoints',icon='EDITMODE_HLT')
             box.prop(props, 'radius')
             box.prop(props, 'smoothing', slider=True)
             box.prop(props, 'subdivisions')
@@ -1480,7 +1670,7 @@ class ROPES_PT_Panel(bpy.types.Panel):
 CLASSES = (ROPES_PG_Anchor, ROPES_PG_Knot, ROPES_PG_Rope, ROPES_PG_Junction,
            ROPES_PG_Settings, ROPES_OT_Rebuild, ROPES_OT_UseSelected,
            ROPES_OT_Draw, ROPES_OT_Remove, ROPES_OT_RemoveLastPoint,
-           ROPES_OT_SelectRope, ROPES_OT_Generate, ROPES_UL_Waypoints, ROPES_UL_Knots, ROPES_UL_Junctions,
+           ROPES_OT_SelectRope, ROPES_OT_EditWaypoints, ROPES_OT_Generate, ROPES_UL_Waypoints, ROPES_UL_Knots, ROPES_UL_Junctions,
            ROPES_OT_SwapCrossing, ROPES_PT_Panel)
 
 

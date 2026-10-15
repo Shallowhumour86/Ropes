@@ -1,9 +1,9 @@
-# Blender 4.4 viewport acceptance — version 0.5
+# Blender 4.4 viewport acceptance — version 0.6
 
 These checks need Blender's interactive desktop UI. Headless tests verify the
 underlying geometry and projected mouse math, rather than all UI behavior.
 
-- Install the 0.5.0 ZIP over an enabled 0.1 add-on without restarting Blender.
+- Install the 0.6.0 ZIP over an enabled 0.1 add-on without restarting Blender.
   Repeat after a failed 0.2 install and confirm that enabling recovers.
   Verify the Ropes sidebar and version without console errors.
 - Open an old 0.1 blend. Confirm its ropes retain their width and compression
@@ -70,3 +70,14 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   meshes must not regenerate on each click. Repeat moving points and undo/redo.
 - Set Run Spacing to 1: both runs should be nearly touching. Open a 0.4 scene
   with custom spacing and verify conversion preserves the physical separation.
+
+- Decrease Waypoint Size and place close points. Marker and click target should
+  shrink together. Put a solid mesh in front of a marker: by default it must be
+  hidden and unpickable. Enable Waypoints Through Objects and repeat.
+- Return a generated rope to Edit Waypoint Draft. Add/move/retype points, undo and
+  redo, save/reopen, then Generate Rope. Verify its knots and crossing choices.
+  Repeat by enabling Waypoint Mode before Extend / Edit Ropes.
+- Compare minimum-size normal/junction knots, including doubled ropes. Follow the
+  entering runs through the shared knot and inspect entry clearance from all sides.
+- On a coarse cube, inspect single/doubled turns for pinched inner tubes. On a
+  coarse Suzanne and a varying-width groove, inspect doubled ropes for spikes.

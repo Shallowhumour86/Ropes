@@ -48,6 +48,20 @@ class Surface:
             raise ValueError('Could not find a surface near this point.')
         return co, normal, face
 
+    def inside(self, point):
+        if not self.closed:
+            return False
+        direction=Vector((.812381,.371193,.449157)).normalized()
+        origin=Vector(point)
+        count=0
+        for _ in range(256):
+            hit,_,_,_=self.bvh.ray_cast(origin,direction)
+            if hit is None:
+                return count%2==1
+            count+=1
+            origin=hit+direction*1e-6
+        return True
+
     def normal_at(self, point):
         co,normal,face=self.project(point)
         ids=self.faces[face]
@@ -363,25 +377,38 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
                 side=side.lerp(guide,.2)
         side.normalize()
         last_side, last_tangent = side.copy(), tangent.copy()
-        # Keep the pair rigid while clearing the object: pushing each lane
-        # independently toward a valley wall squeezed them into one another.
+        # Bounded distance corrections do not divide by a nearly perpendicular
+        # surface normal. Both runs move together, preserving their separation.
         center=point.copy()
-        floating=free is not None and free[i]
-        support=normal
-        for _ in range(12):
-            lift=0
-            for sign in (-1,1):
-                candidate=center+side*(half*sign)
-                co,n,_=surface.project(candidate)
-                signed=(candidate-co).dot(n)
-                blocked=((candidate-co).length<radius*1.05 or (surface.closed and signed<0)) if floating else signed<radius*1.05
-                if blocked:
-                    lift=max(lift,(radius*1.05-signed)/max(.1,support.dot(n)))
-            if lift<radius*1e-6:
+        for _ in range(40):
+            corrections=[contact_correction(surface,center+side*(half*sign),radius,point)
+                         for sign in (-1,1)]
+            correction=sum(corrections,Vector())
+            if max(c.length for c in corrections)<radius*1e-5:
                 break
-            center+=support*lift
+            if correction.length>radius*.6:
+                correction=correction.normalized()*radius*.6
+            center+=correction
         for lane, sign in zip(lanes, (-1, 1)):
             lane.append(center+side*(half*sign))
+    if all(abs(a-b)>1e-8 for a,b in zip(stations,stations[1:])):
+        centers=[(a+b)/2 for a,b in zip(*lanes)]
+        offsets=[(b-a)/2 for a,b in zip(*lanes)]
+        for _ in range(24):
+            updated=[centers[0]]
+            for i in range(1,len(centers)-1):
+                center=centers[i].lerp((centers[i-1]+centers[i+1])/2,.45)
+                for _ in range(10):
+                    corrections=[contact_correction(surface,center+sign*offsets[i],radius,points[i]) for sign in (-1,1)]
+                    delta=sum(corrections,Vector())
+                    if max(c.length for c in corrections)<radius*1e-5:
+                        break
+                    if delta.length>radius*.6:
+                        delta=delta.normalized()*radius*.6
+                    center+=delta
+                updated.append(center)
+            centers=updated+[centers[-1]]
+        lanes=[[c-sign*o for c,o in zip(centers,offsets)] for sign in (1,-1)]
     center = (lanes[0][0]+lanes[1][0])/2
     side = (lanes[0][0]-lanes[1][0])/2
     tangent = points[1]-points[0]
@@ -491,7 +518,7 @@ def spanning_route(surface, start, end, radius):
     return resample(result,max(radius*.5,cumulative(result)[-1]/600))
 
 
-def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1):
+def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1):
     """Two components of a torus link: both ropes alternate over and under."""
     x=frame.normalized()
     z=normal.normalized()
@@ -499,8 +526,8 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
     if y.length < .1:
         y=x.orthogonal().normalized()
     z=x.cross(y).normalized()
-    major=(1.6*max(ra,rb)+.9*min(ra,rb))*size
-    minor=.65*(ra+rb)*size
+    minor=max(ra,rb)*(1.05+.45*(bundle-1))*size
+    major=minor+max(ra,rb)*1.05*size
     height=minor+max(ra,rb)*1.15
     winding={'OVERHAND':1,'FIGURE_EIGHT':2,'TREFOIL':3}[kind]
     cut=math.atan2(lead.dot(y),lead.dot(x))+math.pi/2
@@ -539,4 +566,86 @@ def fair_contact_path(surface, points, radius, amount=1, pinned=()):
                     candidate=candidate+n*(radius*1.05-signed)
                 updated.append(candidate)
             result=updated
+    return result
+
+
+def contact_correction(surface,point,radius,reference=None):
+    co,n,_=surface.project(point)
+    delta=point-co
+    gap=delta.length
+    # A closest face's infinite plane is not a solid. At edges its signed
+    # distance can be negative even when the point is well outside the object.
+    inside=delta.dot(n)<-1e-7 and surface.inside(point)
+    crossed=False
+    if reference is not None and not surface.closed:
+        ray=point-reference
+        if ray.length>1e-7:
+            hit,_,_,dist=surface.bvh.ray_cast(reference,ray.normalized(),ray.length)
+            crossed=hit is not None and dist<ray.length-1e-6
+    if gap>=radius*1.045 and not inside and not crossed:
+        return Vector()
+    if inside:
+        direction=-delta.normalized() if gap>1e-8 else n
+        return co+direction*radius*1.05-point
+    if crossed:
+        direction=n if n.dot(reference-co)>=0 else -n
+        return co+direction*radius*1.05-point
+    direction=delta.normalized() if gap>1e-8 else n
+    return direction*max(0,radius*1.05-gap)
+
+
+def round_bends(surface,points,radius,minimum_radius,protected=None):
+    """Round tight corners with a local clearance cushion, not an inside miter."""
+    if len(points)<3:
+        return points
+    lengths=cumulative(points)
+    bends=[]
+    for i,(a,p,b) in enumerate(zip(points,points[1:],points[2:]),1):
+        if protected is not None and protected[i]:
+            continue
+        u,v=p-a,b-p
+        cross=u.cross(v).length
+        bend_radius=u.length*v.length*(b-a).length/(2*cross) if cross>1e-10 else 1e20
+        if bend_radius<minimum_radius:
+            bends.append(lengths[i])
+    if not bends:
+        return points
+    padding=[]
+    for station in lengths:
+        d=min(abs(station-b) for b in bends)
+        t=max(0,min(1,(minimum_radius*5-d)/(minimum_radius*3)))
+        padding.append(radius+(minimum_radius-radius)*t*t*(3-2*t))
+    result=[p.copy() for p in points]
+    for _ in range(60):
+        updated=[result[0]]
+        for i in range(1,len(result)-1):
+            if protected is not None and protected[i]:
+                updated.append(result[i])
+                continue
+            p=result[i].lerp((result[i-1]+result[i+1])/2,.55)
+            p+=contact_correction(surface,p,padding[i],result[i])
+            updated.append(p)
+        result=updated+[result[-1]]
+    return result
+
+
+def align_knot_entries(points,tangent,count=18):
+    """Preserve the knot core while aligning its two attachment tangents."""
+    result=[p.copy() for p in points]
+    count=min(count,len(points)//5)
+    for incoming in (True,False):
+        if incoming:
+            a,b=points[0],points[count]
+            ta,tb=tangent,points[count+1]-points[count-1]
+            indices=range(count)
+        else:
+            a,b=points[-count-1],points[-1]
+            ta,tb=points[-count]-points[-count-2],tangent
+            indices=range(len(points)-count-1,len(points))
+        scale=(b-a).length*.45
+        c=a+ta.normalized()*scale
+        d=b-tb.normalized()*scale
+        for j,index in enumerate(indices):
+            t=j/count
+            result[index]=(1-t)**3*a+3*(1-t)**2*t*c+3*(1-t)*t*t*d+t**3*b
     return result

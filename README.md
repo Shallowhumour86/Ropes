@@ -1,4 +1,4 @@
-# Surface Ropes 0.5.0 — Blender 4.4
+# Surface Ropes 0.6.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.5.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.5.0.zip).
+[Download version 0.6.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.6.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,24 +23,24 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.5.0
+## New in 0.6.0
 
-- Continuous contact normals, relaxed offset paths and stable doubled-run frames
-  reduce valley kinks and bunching. Path Smoothing still controls path relaxation.
-- Spanning endpoints use the same rope-radius clearance as surface routes, rather
-  than lifting them by the full doubled bundle width. Transitions are relaxed
-  together. Indentation eases to zero where a surface section meets a span,
-  avoiding an abrupt height step when compression is enabled. Waypoint markers
-  sit at their surface contact locations.
-- Draft placement updates only draft markers and undo metadata. Existing rope
-  routing, meshes, crossing detection and deformation wait until Generate Rope.
-- **Run Spacing** now starts at **1**: two nearly touching ropes, with centerlines
-  2.02 radii apart. Existing saved spacing is converted to preserve separation.
-- A smaller doubled-overhand core and preserved 3D lane offsets tighten the
-  minimum knot further.
+- **Waypoint Size** changes marker size and its click target together. Smaller
+  markers make closely spaced points easier to place.
+- **Waypoints Through Objects** controls both visibility and picking through
+  solid geometry. It is **off by default**. Display changes do not reroute ropes.
+- **Edit Waypoint Draft** returns an existing rope to markers for deferred editing.
+  Finish your edits and use **Generate Rope** to rebuild it. Manual knots and
+  identifiable crossing choices are retained, including across save/reload.
+- Tighter shared junction knots, straight attachment tangents, and coupled
+  contact relaxation for their entering ropes.
+- Bounded doubled-run contact corrections and joint path relaxation replace the
+  unstable clearance calculation at narrow valleys. Local clearance cushions
+  round sharp bends so the rope's inner side does not fold into itself.
 
-[Knot comparison](dist/surface-ropes-0.5.0-knots.png) ·
-[Valley and span-transition preview](dist/surface-ropes-0.5.0-valleys.png)
+[Knot comparison](dist/surface-ropes-0.6.0-knots.png) ·
+[Shared doubled junction](dist/surface-ropes-0.6.0-junction.png) ·
+[Coarse valley comparison](dist/surface-ropes-0.6.0-valley-regression.png)
 
 ## Plan with waypoints
 
@@ -103,6 +103,19 @@ edit or delete strand meshes independently; they are generated from the rope.
 
 ## Move waypoints
 
+Adjust **Waypoint Size** before drawing to reduce both marker dimensions and the
+pick radius. Hidden markers cannot be selected through a solid mesh unless
+**Waypoints Through Objects** is enabled. The through-object toggle starts off.
+
+To plan more points on an already generated rope, select that rope and click
+**Edit Waypoint Draft**, then **Extend / Edit Ropes**. Its generated geometry and
+compression are replaced by markers while you edit. Click **Generate Rope** after
+finishing. With **Waypoint Mode** enabled, entering **Extend / Edit Ropes** on a
+generated rope also starts a draft automatically. Draft placement, relocation and
+undo/redo do not rebuild the other ropes. Native Blender Undo can restore the
+conversion to a draft; in-tool undo handles subsequent point edits.
+
+
 Enable **Show Waypoints** in the sidebar, then enter **Extend / Edit Ropes**.
 Click a marker to select it; it highlights. Click elsewhere on the selected
 surface to relocate that waypoint. This moves the existing point rather than
@@ -113,8 +126,8 @@ between the same rope pair retains its knot and over/under choices when moved.
 **W** toggles the markers while the tool is running. **Esc** or **RMB** cancels a
 pending relocation; press Esc again to finish the tool. **Ctrl+Z** undoes a move,
 and **Ctrl+Shift+Z** redoes it. To add a point exactly where a marker is, hide the
-markers first with W. Markers are viewport-only and do not render. They can appear
-in front of the mesh for editing; orbit to the desired point if markers overlap.
+markers first with W. Markers are viewport-only and do not render. Enable **Waypoints Through Objects** when you need to select hidden points;
+otherwise orbit to the desired side if markers overlap or are occluded.
 
 ## Knot styles and doubled ropes
 
@@ -169,7 +182,8 @@ rope restores the visible surface.
   or other animated shape keys. Apply required geometry modifiers first.
 - Use outward-facing normals and a manifold mesh. Apply nonuniform scale.
 - Nearly parallel strands are not treated as crossings; very close crossings
-  can merge. Dense knots and extreme compression may intersect.
+  can merge. Junction contact relaxation improves clearance but is a procedural
+  approximation; dense arrangements and extreme compression can still intersect.
 - Knots are connected procedural overhand/figure-eight sections spliced into a rope.
   Junction knots use a shared interwoven link with a separate component for each
   crossing rope. These are procedural visual approximations of tied ropes. Compression is geometric, without collision solving,
@@ -180,7 +194,8 @@ rope restores the visible surface.
   Blender's normal Undo reverses the complete drawing session. Use **Remove Last
   Point** to remove just one anchor after leaving the tool.
 - Large meshes and many ropes take longer to update. Three-strand geometry adds
-  more vertices than the simple tube used in 0.1. Saved blend files retain the
+  more vertices than the simple tube used in 0.1. Junction-knot contact relaxation
+  also adds generation time; waypoint drafts defer that work until generation. Saved blend files retain the
   editable anchors, per-rope settings, knots, and crossing choices.
 
 ## Development
@@ -202,10 +217,12 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 36 integration checks cover routing, flat/curved smoothing, independent
+The 43 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0 and 0.4.0
+marker size/depth picking, generated-rope draft editing/persistence, coarse
+valleys, cube-corner bend radii, knot tangents and junction entry clearance, and
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0 and 0.5.0
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.

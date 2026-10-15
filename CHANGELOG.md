@@ -1,3 +1,16 @@
+# 0.6.0
+
+- Added waypoint display size with a corresponding smaller pick radius.
+- Added waypoint depth visibility/picking toggle, defaulting to occlusion by solid
+  objects; display controls update without rebuilding geometry.
+- Added Edit Waypoint Draft for generated ropes, plus automatic conversion when
+  extending with Waypoint Mode enabled. Pending knots/crossings survive saving.
+- Reduced shared junction core scale and aligned knot attachment tangents.
+- Added coupled capsule contact constraints and fairing for junction knots/entries.
+- Replaced amplified signed-plane bundle offsets with bounded distance-based
+  corrections; relaxed both runs together through changing valley widths.
+- Added local clearance cushions for smooth, tube-safe bends at sharp corners.
+
 # 0.5.0
 
 - Stabilized contact normals and offset paths through concave valleys.
