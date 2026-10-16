@@ -1,3 +1,14 @@
+## 0.9.2
+
+- Removed excess clearance beneath junction knots by lowering both knot
+  components together until their actual rope runs meet the target surface.
+- Used the separate centerlines and radii of doubled runs for the support
+  calculation, excluding the trial folded end that is not part of the knot.
+- Kept the lower entry shape and straight passive section; regenerated approach
+  curves meet the junction at its new height. Free-span junctions are excluded.
+- Added flat/curved, single/doubled, unequal-width, run-spacing and free-span
+  regression coverage. Existing junctions update through Rebuild Ropes.
+
 ## 0.9.1
 
 - Rotated compact-overhand junction bodies by a half-turn around the passive

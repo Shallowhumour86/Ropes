@@ -133,3 +133,16 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   eye. Toggle back to a crossing and confirm its over/under choice is retained.
 - Check individual knots, figure-eight junctions, corner and curved-surface
   routing retain their 0.9.0 behavior.
+
+## Junction surface spacing (0.9.2)
+
+- Create overhand junctions on a flat mesh using single and doubled ropes.
+  Inspect from a low side angle: the bottom of the knot should meet the mesh
+  with rope-thickness clearance rather than floating above it.
+- Repeat on a curved mesh, with unequal widths, larger knots, increased Run
+  Spacing, and compression enabled. Check for penetration as well as gaps.
+- Rebuild a 0.9.1 scene: both knot components should move down together. Trace
+  the eye, inspect entry curves, and check the passive section stays straight.
+- Check self-crossings and both choices of tying rope. Toggle back to a crossing.
+- A knot where either section is a free span should retain its intended height
+  in space, rather than moving toward the target mesh below.

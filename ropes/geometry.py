@@ -692,6 +692,32 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
     return [origin+x*p.dot(chord)+z*p.dot(perpendicular)+axis*p.z for p in local]
 
 
+def junction_support_offset(surface,normal,cores,max_shift):
+    """Lower a rigid junction until one actual rope run meets the surface.
+
+    Whole-bundle envelopes overestimate vertical thickness when paired runs
+    lie side by side. Sphere tracing uses their actual centerlines and radii.
+    """
+    samples=[(p,radius) for points,radius in cores for p in points]
+    if not samples:
+        return Vector()
+    for p,radius in samples:
+        co,n,_=surface.project(p)
+        if (p-co).dot(n)<-1e-7 and (not surface.closed or surface.inside(p)):
+            return Vector()
+    distance=0.0
+    tolerance=min(radius for p,radius in samples)*1e-4
+    for _ in range(40):
+        margin=min((p-normal*distance-surface.project(p-normal*distance)[0]).length-radius*1.05
+                   for p,radius in samples)
+        if margin<=tolerance or distance>=max_shift:
+            break
+        # Distance to a surface is 1-Lipschitz, so this step cannot pass
+        # through any sampled rope's clearance envelope.
+        distance=min(max_shift,distance+margin*.99)
+    return -normal*distance
+
+
 def fair_contact_path(surface, points, radius, amount=1, pinned=(), references=None):
     """Relax an offset path in free space, pushing out only on contact.
 

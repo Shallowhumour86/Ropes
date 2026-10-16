@@ -1069,25 +1069,24 @@ class RopesIntegration(unittest.TestCase):
         self.assertFalse(ropes.junction_active_a(self.settings.junctions[0]))
         self.assertTrue(self.settings.junctions[0].knot_owner_set)
 
-    def test_junction_overhand_leads_are_lower_and_passive_is_unchanged(self):
-        from zipfile import ZipFile
-        # Compare with the shipped version whose passive rope was accepted.
-        reference={}
-        with ZipFile(ROOT/'dist'/'surface-ropes-0.9.0.zip') as archive:
-            exec(compile(archive.read('ropes/geometry.py'),'geometry_090.py','exec'),reference)
+    def test_junction_overhand_leads_are_lower_and_passive_stays_straight(self):
         a=self.rope((-1.5,0,0),(1.5,0,0))
         b=self.rope((0,-1.5,0),(0,1.5,0))
         ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
         for doubled in (False,True):
             with ropes.quiet_updates():
                 a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            with patch.object(ropes,'junction_points',reference['junction_points']):
-                ropes.rebuild(bpy.context.scene,self.target,repath=False)
-                passive_before=[tuple(p) for p in ropes.visible_path(b)]
             ropes.rebuild(bpy.context.scene,self.target,repath=False)
-            passive_after=ropes.visible_path(b)
-            self.assertEqual(len(passive_before),len(passive_after))
-            self.assertLess(max((Vector(p)-q).length for p,q in zip(passive_before,passive_after)),b.ropes_rope.radius*1e-5)
+            passive_points=ropes.visible_path(b)
+            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
+            passive_core=[p for p,station in zip(passive_points,json.loads(b['ropes_stations'])) if abs(station-passive_station)<1e-6]
+            # Grounding moves both components together; the passive section
+            # retains its straight shape through the eye at the new height.
+            self.assertLess(max(p.z for p in passive_core)-min(p.z for p in passive_core),1e-5)
+            expected=b.ropes_rope.radius*1.01 if doubled else 0
+            left,right=min(p.x for p in passive_core),max(p.x for p in passive_core)
+            self.assertAlmostEqual(right-left,expected*2,places=5)
+            self.assertTrue(all(min(abs(p.x-left),abs(p.x-right))<1e-5 for p in passive_core))
             station=ropes.knot_records(bpy.context.scene,a)[0]['station']
             points=ropes.visible_path(a)
             stations=json.loads(a['ropes_stations'])
@@ -1105,6 +1104,50 @@ class RopesIntegration(unittest.TestCase):
                     if cross>1e-10:
                         bend=u.length*v.length*(r-p).length/(2*cross)
                         self.assertGreater(bend,ropes.envelope_radius(a))
+
+    def test_junction_actual_runs_contact_flat_and_curved_surfaces(self):
+        for shape in ('FLAT','SPHERE'):
+            if shape=='SPHERE':
+                bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=2)
+                self.target=bpy.context.object
+                self.settings.target=self.target
+                height=math.sqrt(4-.6**2)
+                aa,bb=[(-.6,0,height),(.6,0,height)],[(0,-.6,height),(0,.6,height)]
+            else:
+                aa,bb=[(-1.5,0,0),(1.5,0,0)],[(0,-1.5,0),(0,1.5,0)]
+            a=self.rope(*aa)
+            b=self.rope(*bb)
+            joint=next(j for j in self.settings.junctions if j.rope_a==a and j.rope_b==b)
+            ropes.knot_at(bpy.context.scene,a,joint.distance_a)
+            for doubled,spacing,passive_radius in ((False,1,.035),(True,1,.035),(True,2,.05)):
+                with self.subTest(shape=shape,doubled=doubled,spacing=spacing):
+                    with ropes.quiet_updates():
+                        a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+                        a.ropes_rope.double_spacing=b.ropes_rope.double_spacing=spacing
+                        b.ropes_rope.radius=passive_radius
+                    ropes.rebuild(bpy.context.scene,self.target,repath=False)
+                    surface=Surface(self.target,0)
+                    gaps=[]
+                    for owner in (a,b):
+                        station=ropes.knot_records(bpy.context.scene,owner)[0]['station']
+                        core=[p for p,s in zip(ropes.visible_path(owner),json.loads(owner['ropes_stations'])) if abs(s-station)<1e-6]
+                        gaps.extend((p-surface.project(p)[0]).length/owner.ropes_rope.radius for p in core)
+                    self.assertGreaterEqual(min(gaps),1.0)
+                    # Before grounding, the single knot had nearly two radii
+                    # of clearance; paired runs floated higher still.
+                    self.assertLessEqual(min(gaps),1.15)
+
+    def test_spanning_junction_is_not_lowered_toward_target(self):
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        with ropes.quiet_updates():
+            for owner in (a,b):
+                for anchor in owner.ropes_rope.anchors:
+                    anchor.kind='SPANNING'
+        ropes.rebuild(bpy.context.scene,self.target)
+        with patch.object(ropes._geometry,'junction_support_offset',side_effect=AssertionError('Free spans must not be grounded')):
+            ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
+        self.assertTrue(self.settings.junctions[0].is_knot)
 
     def test_junction_active_knot_encircles_passive_axis(self):
         from ropes.geometry import junction_points,point_segment_distance

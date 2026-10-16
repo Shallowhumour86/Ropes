@@ -16,7 +16,7 @@ import addon_utils
 
 old_name = sys.argv[2] if len(sys.argv) > 2 else 'surface-ropes-0.1.0.zip'
 old = root / 'dist' / old_name
-new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.9.1.zip')
+new = root / 'dist' / (sys.argv[1] if len(sys.argv) > 1 else 'surface-ropes-0.9.2.zip')
 assert bpy.ops.preferences.addon_install(filepath=str(old)) == {'FINISHED'}
 bpy.utils.refresh_script_paths()
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
@@ -51,7 +51,7 @@ if expected_old >= (0, 3, 0):
 assert bpy.ops.preferences.addon_install(filepath=str(new), overwrite=True) == {'FINISHED'}
 module = addon_utils.enable('ropes', default_set=True, persistent=True)
 assert module is not None, 'Upgraded add-on failed to enable'
-assert module.bl_info['version'] == (0, 9, 1)
+assert module.bl_info['version'] == (0, 9, 2)
 # The headless Python-module runner has no UI event loop to execute timers.
 assert module.migrate_after_enable() is None
 settings = bpy.context.scene.ropes_settings

@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 9, 1),
+    'version': (0, 9, 2),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
@@ -648,8 +648,25 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             active_station=joint.distance_a if junction_active_a(joint) else joint.distance_b
             active_path=rest_path(active)
             active_tangent=sample_at(active_path,cumulative(active_path),active_station)[1]
-            loop=junction_points(center,frame,active_tangent,normal,envelope_radius(active),
-                                 envelope_radius(passive),record['component'],kind,active.ropes_rope.knot_size)
+            curves=[junction_points(center,frame,active_tangent,normal,envelope_radius(active),
+                                    envelope_radius(passive),component,kind,active.ropes_rope.knot_size)
+                    for component in (0,1)]
+            offset=Vector()
+            if not floating:
+                supports=[]
+                for owner,curve,rest,distance in zip((active,passive),curves,(active_path,passive_path),(active_station,passive_station)):
+                    physical=curve
+                    if owner.ropes_rope.doubled:
+                        guide=surface.normal_at(sample_at(rest,cumulative(rest),distance)[0])
+                        physical,_=doubled_path(surface,curve,[0.0]*len(curve),owner.ropes_rope.radius,
+                                               owner.ropes_rope.double_spacing,normals=[guide]*len(curve))
+                        # The real folded end is at the start of the rope,
+                        # not at the knot's attachment: omit this trial bight.
+                        physical=physical[:len(curve)]+physical[-len(curve):]
+                    supports.append((physical,owner.ropes_rope.radius))
+                offset=_geometry.junction_support_offset(surface,normal,supports,
+                        max(envelope_radius(active),envelope_radius(passive))*8*active.ropes_rope.knot_size)
+            loop=[p+offset for p in curves[record['component']]]
         elif kind == 'TREFOIL':
             loop = knot_points(center+normal*radius, tangent, normal, body_radius*1.5, kind)
         else:

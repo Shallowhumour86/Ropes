@@ -4,6 +4,12 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
+Version 0.9.2 adds a shared support translation after constructing both junction
+components. Sphere-traced clearance uses each actual rope run and its radius,
+including paired runs, to seat the knot against the base mesh. Both components
+move together; their relative eye geometry and knot topology remain intact.
+Junctions involving free spans skip this surface-placement step.
+
 Version 0.9.1 turns compact-overhand junction bodies by a half-turn around the
 passive axis and reverses their traversal, placing both open attachments lower.
 Short attachment guards align with the tying rope's direction. The passive core
