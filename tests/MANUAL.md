@@ -146,3 +146,23 @@ underlying geometry and projected mouse math, rather than all UI behavior.
 - Check self-crossings and both choices of tying rope. Toggle back to a crossing.
 - A knot where either section is a free span should retain its intended height
   in space, rather than moving toward the target mesh below.
+
+## Centreline Tightness and close junction fit (0.10.0)
+
+- On a plane with Squishiness 0, test Tightness 0, 0.5 and 1: the normal route
+  must sit one radius, half a radius and zero above the base mesh respectively.
+  Repeat doubled: the central bundle route follows that height, with the two
+  runs offset laterally. Change width and confirm the clearance scales at once.
+- At Tightness 1, increase Squishiness. The mesh should indent while the normal
+  centreline stays fixed. Use a sufficiently dense target mesh. Check per-rope
+  independence, zero squish/tightness and removing the last rope.
+- Place normal waypoints through narrow and varying valleys at each Tightness.
+  The central route should not loop or jump sideways to fit the full tube.
+  Thickness can intersect the undeformed mesh intentionally at high Tightness.
+- Check normal/span transitions still blend smoothly and free spans retain
+  physical clearance and no indentation.
+- Set compact-overhand Knot Size to 1 on single and doubled junctions. Inspect
+  the passive rope's top: the active eye should sit closer, without a uniformly
+  oversized empty loop. Trace the passes and check the passive stays straight.
+- Check junction surface seating, lower entry curves, either tying-rope choice,
+  self-crossings, figure-eight and individual knots, save/reopen, and undo/redo.

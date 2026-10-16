@@ -6,6 +6,7 @@ end = source.index('bpy.ops.object.camera_add', start)
 source = source[:start] + '''owners=[]
 settings.radius=.05
 settings.squish=0
+settings.tension=0
 for row,doubled,label in [(1.3,False,'Single junction'),(-1.3,True,'Doubled junction')]:
     for name,points in [('Rope A',[(-1.8,row,0),(1.8,row,0)]),('Rope B',[(0,row-1.1,0),(0,row+1.1,0)])]:
         with ropes.quiet_updates():
@@ -34,6 +35,6 @@ for owner,color in zip(owners,[(.12,.55,.12,1),(.65,.12,.2,1)]*2):
                         element.color=tuple(c*strength for c in color[:3])+(1,)
             obj.data.materials[0]=mat
 ''' + source[end:]
-source=source.replace("surface-ropes-0.9.2-knots.png","surface-ropes-0.9.2-junction.png")
+source=source.replace("surface-ropes-0.10.0-knots.png","surface-ropes-0.10.0-junction.png")
 source=source.replace('location=(0, -6, 7)','location=(0,-6,3)')
 exec(compile(source, str(Path(__file__).with_name('knot_gallery.py')), 'exec'))

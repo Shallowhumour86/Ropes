@@ -1,4 +1,4 @@
-# Surface Ropes 0.9.2 — Blender 4.4
+# Surface Ropes 0.10.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.9.2](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.9.2.zip).
+[Download version 0.10.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.10.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -22,6 +22,34 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 **Path Smoothing** is adjusted. Click **Rebuild Ropes** after upgrading to update existing knot shapes and their
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
+
+## New in 0.10.0
+
+- **Tightness now controls the normal surface route's centreline clearance**:
+  **0** is one rope radius above the surface; **0.5** is half a radius;
+  **1** places the centreline on the surface. The formula is
+  `radius × (1 − Tightness)`. For doubled ropes this is the central bundle route;
+  the two runs retain their lateral spacing around it.
+- Normal routes no longer try to fit the full tube thickness through a narrow
+  valley. This removes the sideways collision detours. Free spans retain their
+  rope-thickness collision checks, with smooth transitions at their endpoints.
+- **Squishiness** indents the mesh around the fixed normal route. It does not
+  move that centreline farther down. Maximum indentation is
+  `radius × Tightness × Squishiness`; Indent Width controls its falloff.
+- Compact-overhand junctions fit more closely around the passive rope. Extra
+  room is reserved for the active over/under passes rather than a uniformly
+  enlarged eye. Doubled junctions use actual run radii and the passive pair's
+  cross-section, with checks against both passive runs.
+- Junction eye alignment, smoother entries and surface seating are retained.
+
+[Closer-fitting junction knots](dist/surface-ropes-0.10.0-junction.png) ·
+[Centreline routes through narrow valleys (wire surface)](dist/surface-ropes-0.10.0-centerlines.png)
+
+Install the ZIP and click **Rebuild Ropes**. Existing Tightness values now follow
+this new clearance rule; set Tightness to **0** for a full-radius offset. At high
+Tightness with low Squishiness, the rope thickness may intersect the mesh by
+intent. Increase Squishiness to form an indentation around the rope; use enough
+mesh vertices for the deformation to resolve the rope's width.
 
 ## New in 0.9.2
 
@@ -118,8 +146,8 @@ No downloaded knot meshes or additional runtime dependencies are required.
    space also finishes. Middle mouse, wheel and Alt gestures navigate the viewport.
 8. Choose an **Active Rope** from the dropdown, or select any visible strand and
    click **Use Selected Rope**. Change the controls in that rope's named box;
-   changes apply immediately to that rope. Nearby ropes still follow any shared
-   surface indentation at an overlap, but their own settings stay independent.
+   changes apply immediately to that rope. Surface indentation can overlap nearby
+   ropes, but their own settings stay independent.
 9. Click **Extend / Edit Ropes** to continue the active rope. **Remove Last Point**
    removes only its final anchor outside drawing mode. **Remove Active Rope**
    removes the entire rope and its junctions.
@@ -189,7 +217,7 @@ boundaries so there is room for both runs and the folded end.
 - **0** retains mesh-edge routing, including the staircase effect on coarse grids.
 - Intermediate values blend toward a smoother route on the surface.
 - **1** removes edge snapping. Flat spans become exact straight lines; curved spans
-  relax around the surface, with rope thickness offset above it.
+  relax around the surface. Tightness sets the centreline offset separately.
 
 A literal straight chord through a sphere would run inside it, so the maximum
 smoothing on a curved object remains surface-constrained. Clicked anchors are
@@ -198,11 +226,17 @@ preserved. Every successive pair of anchors defines its own smoothed leg.
 
 ## Squishiness
 
-Each rope's **Squishiness** controls how readily the surface compresses beneath
-it; **Tightness** controls indentation strength. **Indent Width** controls the
-spread of that rope's compression in multiples of its radius. The generated runs, folded ends, and knot footprints contribute to compression.
-The strongest local indentation wins where contact regions overlap. Setting one rope's
-squishiness/tightness to zero removes its compression; other ropes retain theirs.
+Each rope's **Tightness** sets its normal route clearance from one radius at 0
+to zero at 1. **Squishiness** controls indentation around that route, up to one
+radius × Tightness at its maximum. The normal route stays fixed while the mesh
+deforms; knot bodies retain their surface-seating behavior. **Indent Width**
+controls the compression falloff in multiples of rope radius. Generated normal
+runs, folded ends and knots contribute; free spans do not.
+
+The strongest local indentation wins where contact regions overlap. Setting a
+rope's squishiness or tightness to zero removes its indentation; other ropes
+retain their own settings. High Tightness intentionally allows the tube to enter
+the undeformed surface so Squishiness can shape the mesh around it.
 
 The add-on uses one combined **Ropes Compression** relative shape key per surface,
 leaves the base mesh intact, and preserves existing shape keys. Do not rename or
@@ -253,13 +287,13 @@ Or, after setup:
 /workspace/.ropes-tools/venv/bin/python tests/restricted_registration.py
 ```
 
-The 55 integration checks cover routing, flat/curved smoothing, independent
+The 58 integration checks cover routing, flat/curved smoothing, independent
 settings, immediate width changes, unequal-width crossings, knots, compression,
 placement undo/redo, strand geometry/UVs/materials, old-settings migration, waypoint relocation/undo, knot footprints/styles, doubled runs/folds, and
 marker size/depth picking, generated-rope draft editing/persistence, coarse
 valleys, cube-corner bend radii, bounded contact gaps on curved surfaces, knot
 body orientation, knot tangents, junction winding/entry clearance, active/passive ownership and unfolded edge routes, and
-save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0 and 0.9.1
+save/reload. Package installation/enabling/disabling and in-process upgrades from 0.1, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1 and 0.9.2
 are checked in temporary Blender profiles. Restricted registration and recovery
 from partial failed registrations are checked explicitly as well. NumPy 1.26 is pinned for Blender 4.4's native ABI. Testing packages
 are for the cloud only; desktop Blender users just install the ZIP.

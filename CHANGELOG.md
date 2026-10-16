@@ -1,3 +1,19 @@
+## 0.10.0
+
+- Changed Tightness to control normal centreline clearance: radius at 0, half
+  radius at 0.5, and zero at 1. Normal routes and paired offsets no longer use
+  full-tube surface collision correction that caused lateral valley detours.
+- Kept full physical clearance for spans and knot cores; blended normal/span
+  endpoint heights and stabilized doubled core frame initialization.
+- Squishiness now deforms the mesh beneath a fixed ordinary route, with maximum
+  indentation radius × Tightness × Squishiness. Knot body seating is retained.
+- Replaced the loose overhand eye with a closer passive cross-section fit;
+  radial room is added at self-crossings. Paired active runs are checked against
+  both actual passive runs. Lower entries, topology and grounding are retained.
+- Added exact clearance, independent deformation, narrow-valley centreline and
+  snug passive-top contact tests. Updated previous full-radius assertions to
+  the new centreline model. Existing settings update through Rebuild Ropes.
+
 ## 0.9.2
 
 - Removed excess clearance beneath junction knots by lowering both knot

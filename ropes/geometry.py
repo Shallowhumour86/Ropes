@@ -454,6 +454,7 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
     last_side = None
     half = radius*1.01*spacing
     physical_lengths=cumulative(points)
+    curve_mode=[surface_refs is not None and surface_refs[i] is not None and len(surface_refs[i])==3 for i in range(len(points))]
     for i, point in enumerate(points):
         nearest, normal, _ = surface.project(point)
         normal = normals[i] if normals is not None else surface.normal_at(nearest)
@@ -468,6 +469,12 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
             tangent.normalize()
         core_start=(at_core and i+1<len(stations) and abs(stations[i+1]-stations[i])<1e-8
                     and (i==0 or abs(stations[i]-stations[i-1])>1e-8))
+        core_end=(at_core and i>0 and abs(stations[i]-stations[i-1])<1e-8
+                  and (i==len(stations)-1 or abs(stations[i+1]-stations[i])>1e-8))
+        if core_start:
+            tangent=(points[i+1]-point).normalized()
+        elif core_end:
+            tangent=(point-points[i-1]).normalized()
         if last_side is None or core_start:
             side = normal.cross(tangent)
             if side.length < 1e-5:
@@ -475,7 +482,7 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
         else:
             side = last_tangent.rotation_difference(tangent) @ last_side
             side -= tangent*side.dot(tangent)
-        if last_side is not None and (point-nearest).length < radius*1.6 and not (free and free[i]):
+        if last_side is not None and not at_core and (point-nearest).length < radius*1.6 and not (free and free[i]):
             guide=normal.cross(tangent)
             if guide.length>1e-5:
                 guide.normalize()
@@ -487,7 +494,7 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
         # Bounded distance corrections do not divide by a nearly perpendicular
         # surface normal. Both runs move together, preserving their separation.
         center=point.copy()
-        for _ in range(40):
+        for _ in range(0 if curve_mode[i] else 40):
             corrections=[contact_correction(surface,center+side*(half*sign),radius,point)
                          for sign in (-1,1)]
             correction=sum(corrections,Vector())
@@ -498,7 +505,7 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
             center+=correction
         for lane, sign in zip(lanes, (-1, 1)):
             lane.append(center+side*(half*sign))
-    if all(abs(a-b)>1e-8 for a,b in zip(stations,stations[1:])):
+    if not any(curve_mode) and all(abs(a-b)>1e-8 for a,b in zip(stations,stations[1:])):
         centers=[(a+b)/2 for a,b in zip(*lanes)]
         offsets=[(b-a)/2 for a,b in zip(*lanes)]
         for _ in range(24):
@@ -522,8 +529,12 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
             if reference is None:
                 previous_side=None
                 continue
-            point,tangent=reference
+            point,tangent=reference[:2]
+            if point is None:
+                continue
             normal=surface.normal_at(point)
+            if len(reference)==3 and isinstance(reference[2],Vector) and reference[2].length>1e-8:
+                normal=reference[2].normalized()
             side=normal.cross(tangent)
             if side.length<1e-8:
                 side=(lanes[1][i]-lanes[0][i]).normalized()
@@ -533,7 +544,11 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
                 side.negate()
             previous_side=side.copy()
             for lane,sign in zip(lanes,(-1,1)):
-                lane[i]=surface.contact(point+side*(half*sign),radius)
+                if len(reference)==3:
+                    co=surface.project(point)[0]
+                    lane[i]=co+(reference[2] if isinstance(reference[2],Vector) else normal*reference[2])+side*(half*sign)
+                else:
+                    lane[i]=surface.contact(point+side*(half*sign),radius)
     center = (lanes[0][0]+lanes[1][0])/2
     side = (lanes[0][0]-lanes[1][0])/2
     tangent = points[1]-points[0]
@@ -643,7 +658,7 @@ def spanning_route(surface, start, end, radius):
     return resample(result,max(radius*.5,cumulative(result)[-1]/600))
 
 
-def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1):
+def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1, active_radius=None, passive_radius=None, passive_half=0):
     """An active overhand around a straight passive rope through its eye.
 
     frame is the passive axis, ra/rb are the active/passive bundle envelopes.
@@ -667,7 +682,16 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
             a,b=radial*math.cos(3*t),radial*math.sin(3*t)
             d=depth*math.sin(4*t)
         else:
-            radial=major+minor*math.cos(3*t)
+            # Fit the passive cross-section, reserving extra radial room only
+            # where the active rope crosses itself. A uniform torus left a
+            # large empty eye above the passive rope.
+            fit=(passive_radius or rb)+(active_radius or ra)*1.05*size
+            ux,uz=abs(math.sin(2*t)),abs(math.cos(2*t))
+            if passive_half and fit*ux<=passive_half*uz:
+                radial=fit/max(uz,1e-8)
+            else:
+                radial=passive_half*ux+math.sqrt(max(0,fit*fit-passive_half*passive_half*uz*uz))
+            radial+=ra*2.1*size*max(0,math.cos(3*t))**2
             a,b=radial*math.cos(2*t),radial*math.sin(2*t)
             d=depth*math.sin(3*t)
         local.append(Vector((a,b,d)))
@@ -686,8 +710,8 @@ def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1
         core=[origin-x*p.dot(chord)-z*p.dot(perpendicular)+axis*p.z for p in reversed(local)]
         # Give the entry guards enough horizontal room to turn into the body;
         # aligning a tangent at an unmoved port otherwise creates a tight elbow.
-        core[0]-=x*ra*1.5
-        core[-1]+=x*ra*1.5
+        core[0]-=x*ra*1.75
+        core[-1]+=x*ra*1.75
         return align_knot_entries(core,lead,count=12)
     return [origin+x*p.dot(chord)+z*p.dot(perpendicular)+axis*p.z for p in local]
 

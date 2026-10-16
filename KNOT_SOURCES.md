@@ -4,6 +4,12 @@ The compact overhand and figure-eight styles use standard trefoil and figure-eig
 parameterizations, independently adapted into open centerlines with curved leads,
 rope thickness, surface clearance, and optional paired runs.
 
+Version 0.10.0 fits the overhand eye around the passive cross-section rather
+than a uniformly enlarged torus. Its inner sections follow a close offset;
+additional radial room at active self-crossings preserves the over/under passes.
+Actual paired runs are checked against both passive runs and adjusted outward
+only where needed. The shared surface support translation is retained.
+
 Version 0.9.2 adds a shared support translation after constructing both junction
 components. Sphere-traced clearance uses each actual rope run and its radius,
 including paired runs, to seat the knot against the base mesh. Both components

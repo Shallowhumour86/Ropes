@@ -16,5 +16,5 @@ for row,dense,doubled in [(.7,False,False),(.25,False,True),(-.2,True,False),(-.
 ropes.rebuild(scene,target)
 """+source[b:]
 source=source.replace('location=(0, -6, 7)','location=(4,-6,3)').replace('ortho_scale = 6.3','ortho_scale = 3.6')
-source=source.replace('surface-ropes-0.9.2-knots.png','surface-ropes-0.9.2-corners.png')
+source=source.replace('surface-ropes-0.10.0-knots.png','surface-ropes-0.10.0-corners.png')
 exec(compile(source,str(Path(__file__).with_name('knot_gallery.py')),'exec'))
