@@ -1178,6 +1178,7 @@ class RopesIntegration(unittest.TestCase):
     def test_shared_knot_seats_on_curved_geometry_without_distortion(self):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=2)
         self.target=bpy.context.object;self.settings.target=self.target
+        self.settings.tension=0
         height=math.sqrt(4-.6**2)
         a=self.rope((-.6,0,height),(.6,0,height))
         b=self.rope((0,-.6,height),(0,.6,height))
@@ -1199,6 +1200,51 @@ class RopesIntegration(unittest.TestCase):
         self.assertLess(max((p-q-shift).length for p,q in zip(cores[0],expected)),1e-5)
         gaps=[(p-surface.project(p)[0]).length/owner.ropes_rope.radius for owner,core in zip((a,b),cores) for p in core]
         self.assertGreater(min(gaps),.99);self.assertLess(min(gaps),1.12)
+
+    def test_full_squish_clears_rope_between_surface_vertices(self):
+        r=self.rope((-1.5,.04,0),(1.5,.04,0))
+        with ropes.quiet_updates():
+            r.ropes_rope.tension=1;r.ropes_rope.squish=1;r.ropes_rope.falloff=1
+        ropes.rebuild(bpy.context.scene,self.target)
+        bpy.context.view_layer.update()
+        evaluated=Surface(self.target.evaluated_get(bpy.context.evaluated_depsgraph_get()),0)
+        for obj in bpy.context.scene.objects:
+            if obj.get('ropes_owner')!=r.ropes_rope.uid or obj.type!='MESH':continue
+            for v in obj.data.vertices:
+                p=obj.matrix_world@v.co
+                q,n,_=evaluated.project(p)
+                self.assertGreaterEqual((p-q).dot(n),-1e-5)
+
+    def test_junction_tightness_lowers_both_cores_rigidly(self):
+        self.settings.tension=0
+        a=self.rope((-1.5,0,0),(1.5,0,0));b=self.rope((0,-1.5,0),(0,1.5,0))
+        joint=next(j for j in self.settings.junctions if j.rope_a==a and j.rope_b==b)
+        ropes.knot_at(bpy.context.scene,a,joint.distance_a)
+        def cores():
+            return [[p.copy() for p,s in zip(ropes.visible_path(r),json.loads(r['ropes_stations']))
+                     if abs(s-station)<1e-6] for r,station in ((a,joint.distance_a),(b,joint.distance_b))]
+        original=cores();height=original[1][15].z
+        for tightness in (.5,1):
+            a.ropes_rope.tension=tightness
+            current=cores()
+            for before,after in zip(original,current):
+                self.assertEqual(len(before),len(after))
+                self.assertLess(max((q-p+Vector((0,0,height*tightness))).length for p,q in zip(before,after)),1e-5)
+            self.assertAlmostEqual(current[1][15].z,height*(1-tightness),places=6)
+        before=cores();a.ropes_rope.squish=1;b.ropes_rope.squish=1
+        for old,new in zip(before,cores()):
+            self.assertLess(max((a-b).length for a,b in zip(old,new)),1e-6)
+        surface=Surface(self.target,0)
+        field=ropes.PressureField(bpy.context.scene,self.target)
+        lowest=min(before[0],key=lambda p:p.z)
+        self.assertGreaterEqual(field.value(surface.project(lowest)[0]),a.ropes_rope.radius-lowest.z-1e-5)
+        bpy.context.view_layer.update()
+        deformed=Surface(self.target.evaluated_get(bpy.context.evaluated_depsgraph_get()),0)
+        for obj in bpy.context.scene.objects:
+            if obj.type!='MESH' or not obj.get('ropes_helper'):continue
+            for vertex in obj.data.vertices:
+                p=obj.matrix_world@vertex.co;q,n,_=deformed.project(p)
+                self.assertGreaterEqual((p-q).dot(n),-1e-5)
 
     def test_centre_curve_view_is_exact_and_reversible(self):
         r=self.rope((-1.5,0,0),(1.5,0,0))

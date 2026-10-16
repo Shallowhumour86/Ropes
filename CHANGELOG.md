@@ -1,3 +1,8 @@
+## 0.12.3
+
+- Give indentation a full-depth rope footprint and mesh-aware vertex coverage. Include the depth of sunken knot sections.
+- Lower junction knots rigidly with Tightness, placing the passive core on the base surface at 1. Remove Squishiness-driven knot displacement.
+
 ## 0.12.2
 
 - Increase junction-eye overlap to 30% of the smaller rope radius.

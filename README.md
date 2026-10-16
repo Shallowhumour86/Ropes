@@ -1,9 +1,9 @@
-# Surface Ropes 0.12.2 — Blender 4.4
+# Surface Ropes 0.12.3 — Blender 4.4
 
 Draw single braided ropes across a mesh, create over/under junctions and overhand
 knots, and compress the underlying surface. Each rope has independent controls.
 
-[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.2.zip)
+[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.3.zip)
 
 ## This release
 
@@ -86,7 +86,8 @@ Selecting a fibre helper and using **Use Selected Rope** selects its owning rope
 Right-click away from a crossing to toggle a knot on a line. At a crossing between
 ropes, the clicked rope becomes the tying rope. At a self-crossing, the upper
 passage ties around the lower passage. The passive core stays straight through
-the eye. **Swap Over / Under** changes an ordinary junction's crossing order.
+the eye. At Tightness 0 junction knots rest on the surface; at 1 the passive
+core reaches the base surface. Both components move together without reshaping. **Swap Over / Under** changes an ordinary junction's crossing order.
 **Knot Size** scales the shared overhand; its minimum is 1. A junction eye opens
 further when the passive rope is wider, without changing the knot into another
 shape. Closely spaced knots share the available lead distance between stations.
@@ -105,11 +106,15 @@ surfaces meet rather than leaving a gap between circular rope envelopes.
   the base surface, at 0.5 half a radius, and at 1 directly on the surface.
 - **Squishiness:** deform the target beneath the route. Maximum indentation is
   radius × Squishiness, independently of Tightness; the ordinary centreline stays fixed.
+  Full depth covers the rope footprint, with mesh-aware padding to prevent
+  interpolation from weakening the groove. Sunken knots include their depth
+  below the base surface.
 - **Indent Width:** control the width of the deformation footprint.
 
 High Tightness can place part of the rope inside the original mesh; Squishiness
-controls the corresponding indentation. Spans and knot bodies retain physical
-clearance. Existing shape keys are preserved; the add-on manages its own surface
+controls the corresponding indentation. Spans retain physical clearance.
+Knot bodies lower as a rigid shape with Tightness, and the indentation includes
+any knot sections below the base surface. Existing shape keys are preserved; the add-on manages its own surface
 indentation key and removes its effect when the last rope is removed.
 
 Mark both ends of a segment **Spanning** to bridge a gap. Span routes avoid the

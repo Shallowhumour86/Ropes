@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 12, 2),
+    'version': (0, 12, 3),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw single ropes with editable waypoints, snug overhand junction knots and surface compression',
@@ -710,11 +710,15 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
                     for component in (0,1)]
             supports=[(curve,owner.ropes_rope.radius) for owner,curve in zip((active,passive),curves)]
             offset=rigid_knot_offset(surface,normal,supports,settle=not floating)
+            if not floating:
+                passive_center=(curves[1][0]+curves[1][-1])*.5+offset
+                offset-=normal*max(0,(passive_center-nearest).dot(normal))*active.ropes_rope.tension
             loop=[p+offset for p in curves[record['component']]]
         else:
             loop=knot_points(center,tangent,normal,body_radius)
         if not joint:
             loop=align_knot_entries(loop,tangent)
+            if not span_at(rope,station):loop=[p-normal*radius*props.tension for p in loop]
         incoming = bezier_join(result[-1], sample_at(path, lengths, low)[1],
                                 loop[0], loop[1]-loop[0])
         result.extend(incoming)
@@ -948,19 +952,7 @@ def render_ropes(scene, target, surface, ropes, paths):
         physical, stations = displays[rope.name]
         inverse=target.matrix_world.inverted_safe()
         rope['ropes_contact_path']=json.dumps([list(inverse @ p) for p in physical])
-        rendered = []
-        route=paths[rope.name]
-        normals=support_normals(rope,surface,route,cumulative(route),stations)
-        for point,guide in zip(physical,normals):
-            nearest, normal, _ = surface.project(point)
-            station=stations[len(rendered)]
-            weight=0.0
-            if not span_at(rope,station):
-                for record in knot_records(scene,rope):
-                    extent=knot_extent(record,rope)
-                    distance=abs(station-record['station'])
-                    weight=max(weight,max(0,1-distance/extent)**2)
-            rendered.append(point-guide*pressure.value(nearest)*weight)
+        rendered = physical
         set_curve(rope, rendered, radius)
         rope['ropes_stations'] = json.dumps(stations)
         rope.data.bevel_depth = 0
@@ -1007,9 +999,13 @@ class PressureField:
             width=props.radius*props.falloff
             segments=[]
             mappings=[]
+            depths=[]
             for i,(a,b) in enumerate(zip(physical,physical[1:])):
                 if not span_at(rope,(stations[i]+stations[i+1])/2):
-                    segments.append((surface.project(a)[0],surface.project(b)[0]))
+                    pa,na,_=surface.project(a);pb,nb,_=surface.project(b)
+                    segments.append((pa,pb))
+                    depths.append(tuple(props.squish*(props.radius+max(0,-(p-q).dot(n)))
+                                        for p,q,n in ((a,pa,na),(b,pb,nb))))
                     mappings.append((stations[i],stations[i+1]))
             if not segments:
                 continue
@@ -1019,20 +1015,23 @@ class PressureField:
             for i, (point, _) in enumerate(samples):
                 tree.insert(point, i)
             tree.balance()
-            self.contacts.append((tree, samples, segments, width, depth, rope, mappings))
+            self.contacts.append((tree, samples, segments, width, depth, rope, mappings, depths, max(max(d) for d in depths)-min(min(d) for d in depths)>1e-8))
 
-    def value(self, point):
+    def value(self, point, padding=0):
         result = 0.0
-        for tree, samples, segments, width, depth, rope, mappings in self.contacts:
-            candidates = {samples[i][1] for _, i, _ in tree.find_n(point, min(8, len(samples)))}
-            index=min(candidates,key=lambda i:point_segment_distance(point,*segments[i]))
-            a,b=segments[index]
-            delta=b-a
-            t=max(0,min(1,(point-a).dot(delta)/delta.length_squared)) if delta.length_squared else 0
-            station=mappings[index][0]*(1-t)+mappings[index][1]*t
-            distance=point_segment_distance(point,a,b)
-            if distance < width*3:
-                result = max(result, depth*contact_weight(rope,station)*math.exp(-2*(distance/width)**2))
+        for tree, samples, segments, width, depth, rope, mappings, depths, varied in self.contacts:
+            hits=(tree.find_range(point,width*3+rope.ropes_rope.radius+padding) if varied
+                  else tree.find_n(point,min(8,len(samples))))
+            candidates={samples[i][1] for _,i,_ in hits}
+            for index in candidates:
+                a,b=segments[index]
+                delta=b-a
+                t=max(0,min(1,(point-a).dot(delta)/delta.length_squared)) if delta.length_squared else 0
+                station=mappings[index][0]*(1-t)+mappings[index][1]*t
+                distance=max(0,point_segment_distance(point,a,b)-rope.ropes_rope.radius-padding)
+                depth=depths[index][0]*(1-t)+depths[index][1]*t
+                if distance < width*3:
+                    result=max(result,depth*contact_weight(rope,station)*math.exp(-2*(distance/width)**2))
         return result
 
 
@@ -1189,10 +1188,17 @@ def deform(scene, target, pressure=None):
     basis = target.data.shape_keys.reference_key
     inverse = target.matrix_world.inverted_safe()
     normal_matrix = target.matrix_world.to_3x3().inverted_safe().transposed()
+    # Cover each affected face's vertices so interpolation cannot dilute a
+    # full-depth groove between vertices on a coarser surface mesh.
+    padding=[0.0]*len(target.data.vertices)
+    for edge in target.data.edges:
+        a,b=edge.vertices
+        reach=(target.matrix_world.to_3x3() @ (basis.data[a].co-basis.data[b].co)).length
+        padding[a]=max(padding[a],reach);padding[b]=max(padding[b],reach)
     for vertex, base, output in zip(target.data.vertices, basis.data, key.data):
         p = target.matrix_world @ base.co
         normal = (normal_matrix @ vertex.normal).normalized()
-        output.co = inverse @ (p-normal*pressure.value(p))
+        output.co = inverse @ (p-normal*pressure.value(p,padding[vertex.index]))
     key.value = 1
     target.data.update()
 
