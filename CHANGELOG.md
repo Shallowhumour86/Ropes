@@ -1,3 +1,8 @@
+## 0.12.1
+
+- Tighten junction overhand eyes with an overlap of 15% of the smaller rope radius to suggest compression. The passive centreline stays straight and the shared knot shape is preserved.
+- Keep line knots and ordinary over/under junctions unchanged.
+
 ## 0.12.0
 
 - Remove doubled-rope controls and construction, plus figure-eight and legacy

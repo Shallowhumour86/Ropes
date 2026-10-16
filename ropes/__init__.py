@@ -1,10 +1,10 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 12, 0),
+    'version': (0, 12, 1),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
-    'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
+    'description': 'Draw single ropes with editable waypoints, snug overhand junction knots and surface compression',
     'category': 'Object',
 }
 

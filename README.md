@@ -1,9 +1,9 @@
-# Surface Ropes 0.12.0 — Blender 4.4
+# Surface Ropes 0.12.1 — Blender 4.4
 
 Draw single braided ropes across a mesh, create over/under junctions and overhand
 knots, and compress the underlying surface. Each rope has independent controls.
 
-[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.0.zip)
+[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.1.zip)
 
 ## This release
 
@@ -18,7 +18,9 @@ one overhand template and three ways to place it:
    the passive rope passes straight through the expanded eye.
 
 Junction knots start with the line-knot mathematics. A smooth radial expansion
-opens the eye to fit the sum of the two rope radii. The outer hemispheres grow
+opens the eye to the sum of the two rope radii minus 15% of the smaller radius.
+This slight overlap simulates compression of the passive rope; its centreline
+stays straight. The outer hemispheres grow
 less than the eye. The template's crossing order and axial depth are retained.
 Long cubic leads meet the body tangentially. Surface placement translates both
 components together; the previous junction knot construction, local collision

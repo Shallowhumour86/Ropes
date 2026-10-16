@@ -571,7 +571,9 @@ def junction_points(center,frame,lead,normal,ra,rb,component,kind='OVERHAND',siz
     body=align_knot_entries(knot_points(Vector(),lead,normal,ra*size,count=720),lead,count=72)
     eye=overhand_eye(body,lead,normal)
     axis=frame.normalized()
-    body=expand_overhand_eye(body,eye,axis,(ra+rb)*1.01)
+    # A small overlap suggests compression without moving the passive core.
+    clearance=ra+rb-.15*min(ra,rb)
+    body=expand_overhand_eye(body,eye,axis,clearance)
     body=[center+p-eye for p in body]
     if component:
         reach=max(abs((p-center).dot(axis)) for p in body)+ra*3

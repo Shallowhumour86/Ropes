@@ -12,7 +12,8 @@ leads turn this standard trefoil parametrization into the displayed overhand.
 The two projected crossings bound its central eye. At a junction, an axis
 through that eye carries the straight passive rope. Its radial opening uses
 r_new = sqrt(r² + delta), choosing delta so the minimum radius accommodates
-both rope radii. This monotone expansion preserves angular crossing order and
+the sum of both rope radii minus 15% of the smaller radius, allowing slight
+intersection to suggest compression. This monotone expansion preserves angular crossing order and
 axial depth. Surface seating is a shared translation, not a local knot solver.
 
 The previous separate junction formulas, doubled runs, figure-eight and legacy
