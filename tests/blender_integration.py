@@ -133,7 +133,12 @@ class RopesIntegration(unittest.TestCase):
                     pa,pb=ropes.visible_path(a),ropes.visible_path(b)
                     gap=min((x-y).length for u,v in zip(pa,pa[1:]) for c,d in zip(pb,pb[1:])
                             for x,y,_,_ in [closest_segments(u,v,c,d)])
-                    self.assertAlmostEqual(gap,.085,delta=.0001)
+                    self.assertLessEqual(gap,.0851)
+                    self.assertGreater(gap,.085*.6)
+                    j=self.settings.junctions[0]
+                    fibres=[ropes.crossing_strand_segments(r,ropes.visible_path(r),json.loads(r['ropes_stations']),station,.7)
+                            for r,station in ((a,j.distance_a),(b,j.distance_b))]
+                    self.assertAlmostEqual(ropes.strand_segment_gap(*fibres),.085*.46,delta=.00005)
                     passive=a if reverse else b
                     height=ropes.curve_height(passive)
                     self.assertLess(max(abs(p.z-height) for p in ropes.visible_path(passive)),1e-5)
@@ -153,7 +158,10 @@ class RopesIntegration(unittest.TestCase):
                 bb=[i for i in range(len(points)-1) if abs(stations[i]-joint.distance_b)<.3]
                 gap=min((x-y).length for i in aa for j in bb
                         for x,y,_,_ in [closest_segments(points[i],points[i+1],points[j],points[j+1])])
-                self.assertAlmostEqual(gap,2*r.ropes_rope.radius,delta=.0001)
+                self.assertLessEqual(gap,2*r.ropes_rope.radius+.0001)
+                self.assertGreater(gap,1.2*r.ropes_rope.radius)
+                parts=[ropes.crossing_strand_segments(r,points,stations,s,.4) for s in (joint.distance_a,joint.distance_b)]
+                self.assertAlmostEqual(ropes.strand_segment_gap(*parts),.92*r.ropes_rope.radius,delta=.00005)
 
     def test_crossing_apex_is_centered_on_passive_curve(self):
         a=self.rope((-1.5,0,0),(1.5,0,0))
@@ -171,7 +179,8 @@ class RopesIntegration(unittest.TestCase):
             summit=[p.x for p in points if peak.z-p.z<1e-6]
             self.assertLess(abs(sum(summit)/len(summit)),step)
             bottom=max(p.z for p in ropes.visible_path(b))
-            self.assertAlmostEqual(peak.z-bottom,2*a.ropes_rope.radius,delta=.001)
+            self.assertLessEqual(peak.z-bottom,2*a.ropes_rope.radius+.001)
+            self.assertGreater(peak.z-bottom,1.2*a.ropes_rope.radius)
 
     def test_size_one_junction_tightens_actual_curves(self):
         a=self.rope((-1.5,0,0),(1.5,0,0))
@@ -186,6 +195,8 @@ class RopesIntegration(unittest.TestCase):
             loose={r.name:ropes.display_path(bpy.context.scene,r,surface,ropes.rest_path(r)) for r in (a,b)}
             station=ropes.knot_records(bpy.context.scene,a)[0]['station']
             ids=[i for i,s in enumerate(loose[a.name][1]) if abs(s-station)<1e-6]
+            baseline={name:([p.copy() for p in data[0]],list(data[1])) for name,data in loose.items()}
+            ropes.snug_junction_curves(bpy.context.scene,surface,baseline,align=False)
             before=[p.copy() for p in loose[a.name][0]]
             passive_before=[p.copy() for p in loose[b.name][0]]
             ropes.snug_junction_curves(bpy.context.scene,surface,loose)
@@ -210,14 +221,64 @@ class RopesIntegration(unittest.TestCase):
                 if group and i!=group[-1]+1:groups.append(group);group=[]
                 group.append(i)
             groups.append(group)
+            ports=[];aligned_chord=Vector()
             for group in groups:
+                first,last=(loose[a.name][0][i] for i in (group[0],group[-1]))
+                delta=last-first
+                self.assertLess(abs(delta.y),a.ropes_rope.radius*.2)
+                aligned_chord+=delta if delta.x>0 else -delta
+                ports.extend((first,last))
+            self.assertLess(abs(aligned_chord.y),1e-5)
+            self.assertAlmostEqual(sum(p.y for p in ports)/len(ports),0,places=5)
+            # The canonical attachment frame has a fixed external closure.
+            # For aligned open ports, validate wrapping and physical clearance
+            # directly: a world-space closure can cross the repositioned leads.
+            passive_core=[p for p,s in zip(loose[b.name][0],loose[b.name][1]) if abs(s-passive_station)<1e-6]
+            center=sum(passive_core,Vector())/len(passive_core)
+            for group in groups:
+                canonical=[baseline[a.name][0][i] for i in group]
+                self.assertEqual(knot_determinant(canonical),3)
                 core=[loose[a.name][0][i] for i in group]
-                self.assertEqual(knot_determinant(core),3)
+                angles=[math.atan2(p.z-center.z,p.x-center.x) for p in core]
+                winding=sum(math.atan2(math.sin(b-a),math.cos(b-a)) for a,b in zip(angles,angles[1:]))
+                self.assertGreater(abs(winding),2*math.pi)
+                arc=cumulative(core)
+                gaps=[(x-y).length for i in range(len(core)-1) for j in range(i+1,len(core)-1)
+                      if arc[j]-arc[i]>a.ropes_rope.radius*6
+                      for x,y,_,_ in [closest_segments(core[i],core[i+1],core[j],core[j+1])]]
+                self.assertGreater(min(gaps),a.ropes_rope.radius*1.95)
             if doubled:
                 left,right=([loose[a.name][0][i] for i in group] for group in groups)
                 distance=min((x-y).length for p,q in zip(left,left[1:]) for u,v in zip(right,right[1:])
                              for x,y,_,_ in [closest_segments(p,q,u,v)])
                 self.assertGreater(distance,a.ropes_rope.radius*1.95)
+
+    def test_crossing_rendered_strands_touch_at_different_twists(self):
+        from mathutils.bvhtree import BVHTree
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        for doubled in (False,True):
+            for pitch in (7,17):
+                with self.subTest(doubled=doubled,pitch=pitch):
+                    with ropes.quiet_updates():
+                        a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+                        a.ropes_rope.strand_pitch=pitch
+                    ropes.rebuild(bpy.context.scene,self.target)
+                    vertices=[];faces=[]
+                    for obj in bpy.context.scene.objects:
+                        if obj.get('ropes_owner')!=b.ropes_rope.uid or obj.type!='MESH':continue
+                        offset=len(vertices)
+                        vertices.extend(obj.matrix_world@v.co for v in obj.data.vertices)
+                        faces.extend([offset+i for i in f.vertices] for f in obj.data.polygons)
+                    tree=BVHTree.FromPolygons(vertices,faces)
+                    gap=float('inf')
+                    for obj in bpy.context.scene.objects:
+                        if obj.get('ropes_owner')!=a.ropes_rope.uid or obj.type!='MESH':continue
+                        for vertex in obj.data.vertices:
+                            p=obj.matrix_world@vertex.co
+                            if abs(p.x)<.2 and abs(p.y)<.2:
+                                gap=min(gap,tree.find_nearest(p)[3])
+                    self.assertLess(gap,(a.ropes_rope.radius+b.ropes_rope.radius)*.05)
 
     def test_manual_knots_and_extension_preserve_station(self):
         r = self.rope((-1.5, 0, 0), (1, 0, 0))
@@ -380,7 +441,7 @@ class RopesIntegration(unittest.TestCase):
         j = self.settings.junctions[0]
         pa, _ = ropes.sample_at(ropes.visible_path(a), cumulative(ropes.rest_path(a)), j.distance_a)
         pb, _ = ropes.sample_at(ropes.visible_path(b), cumulative(ropes.rest_path(b)), j.distance_b)
-        self.assertGreater(pa.z-pb.z, a.ropes_rope.radius+b.ropes_rope.radius)
+        self.assertGreater(pa.z-pb.z, (a.ropes_rope.radius+b.ropes_rope.radius)*.6)
 
     def test_smoothing_zero_to_exact_straight_line(self):
         bpy.ops.mesh.primitive_grid_add(x_subdivisions=5, y_subdivisions=8, size=4)

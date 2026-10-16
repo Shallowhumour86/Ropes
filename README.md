@@ -1,4 +1,4 @@
-# Surface Ropes 0.11.0 — Blender 4.4
+# Surface Ropes 0.11.1 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.11.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.11.0.zip).
+[Download version 0.11.1](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.11.1.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -22,6 +22,22 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 **Path Smoothing** is adjusted. Click **Rebuild Ropes** after upgrading to update existing knot shapes and their
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
+
+## New in 0.11.1
+
+- Overpasses settle against the actual braided strands after the centre-curve
+  placement. This closes the small gap caused by the braid's scalloped outline,
+  while retaining the centred apex and smooth falloff.
+- Junction knot ports align with the tying rope. An adjustment along the passive
+  axis aligns the body and leads together, keeps the passive rope straight,
+  and retains radial eye clearance. Contact constraints then refit the actual runs.
+- Run Spacing remains exactly one diameter at 1. Crossing curves may approach
+  slightly closer than their circular envelopes where the braided surfaces fit.
+
+Install the update and click **Rebuild Ropes**.
+
+[Crossing contact](dist/surface-ropes-0.11.1-crossings.png) ·
+[Aligned junction knots](dist/surface-ropes-0.11.1-junction.png)
 
 ## New in 0.11.0
 

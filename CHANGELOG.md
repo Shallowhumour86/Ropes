@@ -1,3 +1,15 @@
+## 0.11.1
+
+- Close residual crossing gaps against the three actual fibre centrelines and
+  tube radii, retaining the braid phase of the complete rope. Check crossings
+  again after other path edits so the final rendered strands determine contact.
+- Align the junction knot's full entry/exit chord to the active rope using an
+  axial shear. Apply the same spatial deformation to body and leads, preserving
+  radial clearance around the unchanged passive line; resolve contacts afterward.
+- Add rendered mesh contact checks at different twists, port alignment checks,
+  and wrapping/clearance checks alongside canonical knot topology tests.
+- Keep doubled Run Spacing and saved controls unchanged. Rebuild existing ropes.
+
 ## 0.11.0
 
 - Select the closest crossing candidate within each detection cluster so the

@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 11, 0),
+    'version': (0, 11, 1),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
@@ -917,7 +917,7 @@ def separate_knot_leads(scene,target,surface,displays):
             break
 
 
-def snug_junction_curves(scene,surface,displays):
+def snug_junction_curves(scene,surface,displays,align=True):
     """Tighten actual knot runs without using a bundle envelope as clearance."""
     import numpy as np
     for joint in scene.ropes_settings.junctions:
@@ -952,36 +952,124 @@ def snug_junction_curves(scene,surface,displays):
         np.fill_diagonal(valid,False)
         aa=np.array([tuple(a) for a,b in segments]);edges=np.array([tuple(b-a) for a,b in segments])
         lengths=np.einsum('ij,ij->i',edges,edges)
-        origin=aa.mean(axis=0);axis=np.array(tuple((segments[0][1]-segments[0][0]).normalized()))
+        origin=(aa+edges*.5).mean(axis=0);axis=np.array(tuple((segments[0][1]-segments[0][0]).normalized()))
         normal=np.array(tuple(surface.normal_at(Vector(origin))))
         supported=not (span_at(active,ast) or span_at(passive,pst))
         contacts=[surface.project(Vector(v))[:2] for v in original]
         support=np.array([tuple(co) for co,n in contacts])
         normals=np.array([tuple(n) for co,n in contacts])
         size=active.ropes_rope.knot_size
-        for iteration in range(200):
-            if iteration<70 and size<1.999:
-                radial=p-origin-np.outer((p-origin)@axis,axis)
-                p[free]-=radial[free]*(.006*(2-size))
-            delta=p[:,None,:]-p[None,:,:]
-            distance=np.linalg.norm(delta,axis=2)
-            overlap=np.where(valid,np.maximum(0,radius*2.005-distance),0)
-            correction=delta*(overlap/np.maximum(distance,1e-12))[:,:,None]
-            count=np.maximum(1,np.sum(overlap>0,axis=1))
-            move=correction.sum(axis=1)/count[:,None]*.65
-            p[free]+=move[free]
-            relative=p[:,None,:]-aa[None,:,:]
-            t=np.clip(np.einsum('ijk,jk->ij',relative,edges)/np.maximum(lengths,1e-16),0,1)
-            delta=relative-t[:,:,None]*edges
-            distance=np.linalg.norm(delta,axis=2)
-            nearest=np.argmin(distance,axis=1);row=np.arange(len(p))
-            gap=distance[row,nearest];d=delta[row,nearest]
-            correction=d*(np.maximum(0,goal-gap)/np.maximum(gap,1e-12))[:,None]
-            p[free]+=correction[free]
-            if supported:
-                shift=np.maximum(0,radius*1.0001-np.einsum('ij,ij->i',p-support,normals))
-                p[free]+=shift[free,None]*normals[free]
+        segments_idx=np.array([i for a,b in groups for i in range(a,b-1)])
+        ii,jj=np.triu_indices(len(segments_idx),1)
+        ii,jj=segments_idx[ii],segments_idx[jj]
+        mask=(labels[ii]!=labels[jj])|(np.abs(ii-jj)>1)
+        ii,jj=ii[mask],jj[mask]
+        def capsule_moves(p):
+            current_arc=np.zeros(len(p))
+            for a,b in groups:
+                current_arc[a:b]=np.r_[0,np.cumsum(np.linalg.norm(np.diff(p[a:b],axis=0),axis=1))]
+            eligible=(labels[ii]!=labels[jj])|(np.abs(current_arc[ii]-current_arc[jj])>radius*4)
+            low=np.minimum(p[:-1],p[1:]);high=np.maximum(p[:-1],p[1:])
+            near=eligible&np.all((low[ii]-high[jj]<=radius*2.002)&(low[jj]-high[ii]<=radius*2.002),axis=1)
+            ci,cj=ii[near],jj[near]
+            if len(ci)==0:return np.zeros_like(p)
+            u=p[ci+1]-p[ci];v=p[cj+1]-p[cj];w=p[ci]-p[cj]
+            aa=np.maximum(1e-16,np.einsum('ij,ij->i',u,u))
+            bb=np.einsum('ij,ij->i',u,v)
+            cc=np.maximum(1e-16,np.einsum('ij,ij->i',v,v))
+            dd=np.einsum('ij,ij->i',u,w);ee=np.einsum('ij,ij->i',v,w)
+            denominator=aa*cc-bb*bb
+            st=np.clip(np.divide(bb*ee-cc*dd,denominator,out=np.zeros_like(aa),where=denominator>1e-16),0,1)
+            tt=(bb*st+ee)/cc
+            st=np.where(tt<0,np.clip(-dd/aa,0,1),np.where(tt>1,np.clip((bb-dd)/aa,0,1),st))
+            tt=np.clip(tt,0,1)
+            delta=w+u*st[:,None]-v*tt[:,None]
+            gap=np.linalg.norm(delta,axis=1)
+            hit=(gap<radius*2.002)&(gap>1e-10)
+            i,j,t,q=ci[hit],cj[hit],st[hit],tt[hit]
+            mass=free[i]*(1-t)**2+free[i+1]*t*t+free[j]*(1-q)**2+free[j+1]*q*q
+            amount=np.minimum(radius*.15,np.maximum(0,radius*2.002-gap[hit])/np.maximum(mass,1e-12))
+            correction=delta[hit]*(amount/np.maximum(gap[hit],1e-12))[:,None]
+            moves=np.zeros_like(p);counts=np.zeros(len(p))
+            for index,weight in ((i,1-t),(i+1,t),(j,-(1-q)),(j+1,-q)):
+                np.add.at(moves,index,correction*weight[:,None])
+                np.add.at(counts,index,np.abs(weight))
+            moves/=np.maximum(1,counts)[:,None]
+            moves[~free]=0
+            return moves*.8
+        def relax(p,iterations,attract):
+            for iteration in range(iterations):
+                if attract and iteration<70 and size<1.999:
+                    radial=p-origin-np.outer((p-origin)@axis,axis)
+                    p[free]-=radial[free]*(.006*(2-size))
+                if attract:
+                    delta=p[:,None,:]-p[None,:,:]
+                    distance=np.linalg.norm(delta,axis=2)
+                    overlap=np.where(valid,np.maximum(0,radius*2.005-distance),0)
+                    correction=delta*(overlap/np.maximum(distance,1e-12))[:,:,None]
+                    count=np.maximum(1,np.sum(overlap>0,axis=1))
+                    move=correction.sum(axis=1)/count[:,None]*.65
+                    p[free]+=move[free]
+                else:
+                    p+=capsule_moves(p)
+                relative=p[:,None,:]-aa[None,:,:]
+                t=np.clip(np.einsum('ijk,jk->ij',relative,edges)/np.maximum(lengths,1e-16),0,1)
+                delta=relative-t[:,:,None]*edges
+                distance=np.linalg.norm(delta,axis=2)
+                nearest=np.argmin(distance,axis=1);row=np.arange(len(p))
+                gap=distance[row,nearest];d=delta[row,nearest]
+                correction=d*(np.maximum(0,goal-gap)/np.maximum(gap,1e-12))[:,None]
+                p[free]+=correction[free]
+                if supported:
+                    shift=np.maximum(0,radius*1.0001-np.einsum('ij,ij->i',p-support,normals))
+                    p[free]+=shift[free,None]*normals[free]
+            return p
+        p=relax(p,200,True)
         for i,value in zip(ids,p):points[i]=Vector(value)
+        # Carry the existing knot continuously into the aligned attachment
+        # frame. Small steps with contact refits prevent a compressed doubled
+        # run from passing through another run during one large adjustment.
+        _,lead=sample_at(rest_path(active),cumulative(rest_path(active)),ast)
+        up=Vector(normal);lead=(lead-up*lead.dot(up)).normalized()
+        across=Vector(axis).cross(up).normalized();side=up.cross(lead).normalized()
+        chord=Vector();midpoint=Vector()
+        for a,b in groups:
+            delta=Vector(p[b-1]-p[a])
+            chord+=delta if delta.dot(lead)>0 else -delta
+            midpoint+=Vector(p[a]+p[b-1])/(2*len(groups))
+        denominator=chord.dot(across)*Vector(axis).dot(side)
+        if align and abs(denominator)>1e-8:
+            slope=chord.dot(side)/denominator
+            lateral=(midpoint-Vector(origin)).dot(side)/Vector(axis).dot(side)
+            intercept=lateral-slope*(midpoint-Vector(origin)).dot(across)
+            core_extent=max(abs((Vector(v)-Vector(origin)).dot(across)) for v in p)*1.1
+            reach=max(core_extent*2,max(envelope_radius(active),envelope_radius(passive))*14*size)
+            for _ in range(12):
+                for i,point in enumerate(points):
+                    x=(point-Vector(origin)).dot(across)
+                    t=max(0,min(1,(abs(x)-core_extent)/max(1e-8,reach-core_extent)))
+                    weight=1-t*t*(3-2*t)
+                    points[i]=point-Vector(axis)*((slope*x+intercept)*weight/12)
+                p=np.array([tuple(points[i]) for i in ids],dtype=float)
+                if len(groups)==2:
+                    # Keep both paired attachment cross-sections circular;
+                    # a shear alone can squeeze their fixed endpoint samples.
+                    half=radius*active.ropes_rope.double_spacing
+                    orders=[list(range(a,b)) if (Vector(p[b-1]-p[a])).dot(lead)>0
+                            else list(reversed(range(a,b))) for a,b in groups]
+                    for end in (0,1):
+                        pairs=[tuple(order[depth if not end else -1-depth] for order in orders) for depth in range(4)]
+                        centers=[(p[ia]+p[ib])*.5 for ia,ib in pairs]
+                        for depth,(ia,ib) in enumerate(pairs[:3]):
+                            tangent=Vector(centers[depth+1]-centers[max(0,depth-1)])
+                            section_side=up.cross(tangent).normalized()
+                            offset=np.array(tuple(section_side))*half
+                            if (p[ia]-p[ib])@offset<0:offset=-offset
+                            p[ia]=centers[depth]+offset;p[ib]=centers[depth]-offset
+                p=relax(p,50,False)
+                for i,value in zip(ids,p):points[i]=Vector(value)
+            p=relax(p,200,False)
+            for i,value in zip(ids,p):points[i]=Vector(value)
         if supported:
             passive_core=[point for point,s in zip(below,bstations) if abs(s-pst)<1e-6]
             offset=_geometry.junction_support_offset(surface,Vector(normal),
@@ -993,6 +1081,73 @@ def snug_junction_curves(scene,surface,displays):
                 for i,s in enumerate(ss):
                     blend=max(0,1-abs(s-station)/extent)
                     body[i]+=offset*(blend*blend*(3-2*blend))
+
+
+def crossing_strand_segments(owner,points,stations,station,extent):
+    """Actual braided axes, retaining their phase from the complete rope."""
+    arc=cumulative(points)
+    strands=three_strands(points,owner.ropes_rope.radius,owner.ropes_rope.strand_pitch)
+    count=len(strands[0])-1
+    selected=[]
+    for i in range(count):
+        distance=arc[-1]*(i+.5)/count
+        k=min(len(arc)-2,max(0,bisect.bisect_right(arc,distance)-1))
+        t=(distance-arc[k])/max(arc[k+1]-arc[k],1e-12)
+        if abs(stations[k]*(1-t)+stations[k+1]*t-station)<extent:
+            selected.extend((strand[i],strand[i+1]) for strand in strands)
+    return selected
+
+
+def strand_segment_gap(segments,other):
+    """Closest finite fibre axes; KD bounds include each segment's extent."""
+    if not segments or not other:return float('inf')
+    tree=KDTree(len(other))
+    half=max((b-a).length/2 for a,b in other)
+    for i,(a,b) in enumerate(other):tree.insert((a+b)/2,i)
+    tree.balance()
+    best=float('inf')
+    for a,b in segments:
+        middle=(a+b)/2
+        _,nearest,_=tree.find(middle)
+        c,d=other[nearest]
+        x,y,_,_=_geometry.closest_segments(a,b,c,d)
+        best=min(best,(x-y).length)
+        for _,i,_ in tree.find_range(middle,best+half+(b-a).length/2):
+            c,d=other[i];x,y,_,_=_geometry.closest_segments(a,b,c,d)
+            best=min(best,(x-y).length)
+    return best
+
+
+def seat_crossing_strands(scene,surface,displays,paths):
+    """Close scalloped braid gaps after circular-envelope crossing placement."""
+    for joint in scene.ropes_settings.junctions:
+        if joint.is_knot:continue
+        upper,lower=(joint.rope_a,joint.rope_b) if joint.over_a else (joint.rope_b,joint.rope_a)
+        if upper.name not in displays or lower.name not in displays:continue
+        us,ls=(joint.distance_a,joint.distance_b) if joint.over_a else (joint.distance_b,joint.distance_a)
+        points,stations=displays[upper.name];below,ss=displays[lower.name]
+        radius=upper.ropes_rope.radius+lower.ropes_rope.radius
+        span=max(envelope_radius(upper),envelope_radius(lower))*6
+        crossing=sample_at(paths[upper.name],cumulative(paths[upper.name]),us)[0]
+        normal=surface.normal_at(crossing)
+        # A level centre keeps the established apex aligned during seating.
+        plateau=max(envelope_radius(upper),envelope_radius(lower))
+        weights=[.5*(1+math.cos(math.pi*max(0,abs(s-us)-plateau)/(span-plateau)))
+                 if abs(s-us)<span else 0 for s in stations]
+        support=crossing_strand_segments(lower,below,ss,ls,span)
+        goal=radius*.46
+        def gap(drop):
+            candidate=[p-normal*(drop*w) for p,w in zip(points,weights)]
+            passive=(crossing_strand_segments(lower,candidate,ss,ls,span) if upper==lower else support)
+            return strand_segment_gap(crossing_strand_segments(upper,candidate,stations,us,span),passive)
+        if gap(0)<=goal*(1+1e-4):continue
+        lo=0.0;hi=radius*.45
+        if gap(hi)>goal:continue
+        for _ in range(14):
+            mid=(lo+hi)/2
+            if gap(mid)>goal:lo=mid
+            else:hi=mid
+        displays[upper.name]=([p-normal*(lo*w) for p,w in zip(points,weights)],stations)
 
 
 def fit_crossing_curves(scene, surface, displays, paths):
@@ -1056,6 +1211,8 @@ def render_ropes(scene, target, surface, ropes, paths):
     fit_crossing_curves(scene,surface,displays,paths)
     snug_junction_curves(scene,surface,displays)
     separate_knot_leads(scene,target,surface,displays)
+    for _ in range(2):
+        seat_crossing_strands(scene,surface,displays,paths)
     pressure = PressureField(scene, target, surface, displays)
     helpers = {(o.get('ropes_owner'), o.get('ropes_strand')): o for o in scene.objects
                if o.get('ropes_helper') and o.parent == target}

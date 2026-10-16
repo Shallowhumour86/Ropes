@@ -183,3 +183,11 @@ paired centre curves should be exactly one rope diameter apart. At Knot Size 1,
 inspect the junction eye from several angles; active curves should fit closely
 around the passive rope, preserve their crossings and rest on the target.
 Repeat with different rope widths, a self-crossing and a curved surface.
+
+## Braid contact and knot ports (0.11.1)
+
+Inspect ordinary crossings closely from the side with different Twist Lengths,
+widths and doubled settings. The actual strand surfaces should touch. Inspect
+junction knots from above: the combined entry/exit chord should follow the tying
+rope, without the previous lateral offset. Verify the passive rope stays straight,
+the knot remains snug, and both knot and crossing retain surface seating.
