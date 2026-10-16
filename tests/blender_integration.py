@@ -979,8 +979,17 @@ class RopesIntegration(unittest.TestCase):
         self.assertEqual(curve, [tuple(p) for p in ropes.visible_path(a)])
         key = self.target.data.shape_keys.key_blocks[self.target['ropes_compression_key']]
         self.assertAlmostEqual(min((p.co.z for p in key.data)), -0.04 * 0.8, places=5)
-        a.ropes_rope.tension = 0
-        self.assertEqual(key.value, 0)
+        for tightness in (0, .5, 1):
+            a.ropes_rope.tension = tightness
+            curve = [tuple(p) for p in ropes.visible_path(a)]
+            for squish in (0, .5, 1):
+                a.ropes_rope.squish = squish
+                self.assertEqual(curve, [tuple(p) for p in ropes.visible_path(a)])
+                if squish:
+                    self.assertEqual(key.value, 1)
+                    self.assertAlmostEqual(min(p.co.z for p in key.data), -.04*squish, places=5)
+                else:
+                    self.assertEqual(key.value, 0)
 
     def test_centerline_routes_through_pinched_valley_without_side_loops(self):
         xs = [-1.5 + i * 0.1 for i in range(31)]
@@ -1103,7 +1112,7 @@ class RopesIntegration(unittest.TestCase):
                 deltas.append(after.length_squared-before.length_squared)
             self.assertLess(max(deltas)-min(deltas),1e-7)
             self.assertAlmostEqual(min(ropes.point_segment_distance(p,passive[0],passive[-1]) for p in tying),
-                                   radius+passive_radius-.15*min(radius,passive_radius),places=6)
+                                   radius+passive_radius-.30*min(radius,passive_radius),places=6)
             dots=[(q-p).normalized().dot((r-q).normalized()) for p,q,r in zip(tying,tying[1:],tying[2:])
                   if min((q-p).length,(r-q).length)>1e-8]
             self.assertGreater(min(dots),.9)
@@ -1148,7 +1157,7 @@ class RopesIntegration(unittest.TestCase):
         self.assertLess(max((actual-wanted-translation).length for actual,wanted in zip(core,expected)),1e-5)
         self.assertTrue(all((p-pp[0]).cross(axis).length<1e-6 for p in pp))
         self.assertAlmostEqual(min(ropes.point_segment_distance(p,pp[0],pp[-1]) for p in core),
-                                   active.ropes_rope.radius+passive.ropes_rope.radius-.15*min(active.ropes_rope.radius,passive.ropes_rope.radius),places=6)
+                                   active.ropes_rope.radius+passive.ropes_rope.radius-.30*min(active.ropes_rope.radius,passive.ropes_rope.radius),places=6)
         # Both leads meet the core tangentially, without an elbow at the eye.
         for i,j,k in ((indices[0]-1,indices[0],indices[0]+1),(indices[-1]-1,indices[-1],indices[-1]+1)):
             self.assertGreater((pts[j]-pts[i]).normalized().dot((pts[k]-pts[j]).normalized()),.95)
@@ -1160,7 +1169,7 @@ class RopesIntegration(unittest.TestCase):
                 body,passive=[ropes.junction_points(Vector(),axis,Vector((1,0,0)),Vector((0,0,1)),.035,passive_radius,c)
                               for c in (0,1)]
                 gap=min(ropes.point_segment_distance(p,passive[0],passive[-1]) for p in body)
-                self.assertAlmostEqual(gap,.035+passive_radius-.15*min(.035,passive_radius),places=6)
+                self.assertAlmostEqual(gap,.035+passive_radius-.30*min(.035,passive_radius),places=6)
                 self.assertLess(gap,.035+passive_radius)
                 turns=[(b-a).normalized().dot((c-b).normalized()) for a,b,c in zip(body,body[1:],body[2:])
                        if min((b-a).length,(c-b).length)>1e-8]

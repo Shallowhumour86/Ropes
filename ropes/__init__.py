@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 12, 1),
+    'version': (0, 12, 2),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw single ropes with editable waypoints, snug overhand junction knots and surface compression',
@@ -211,7 +211,7 @@ class ROPES_PG_Rope(bpy.types.PropertyGroup):
                             description='0 follows mesh edges; 1 relaxes toward a straight surface path')
     squish: FloatProperty(name='Squishiness', default=0, min=0, max=1, update=rope_render_update)
     tension: FloatProperty(name='Tightness', default=.5, min=0, max=1, update=rope_render_update,
-                           description='Normal centerline clearance: 0 is one rope radius, 1 is on the surface; also controls indentation')
+                           description='Normal centerline clearance: 0 is one rope radius, 1 is on the surface; independent of Squishiness')
     falloff: FloatProperty(name='Indent Width', default=4, min=1, max=20, update=rope_render_update)
     strand_pitch: FloatProperty(name='Twist Pitch', default=12, min=6, max=30,
                                update=rope_render_update,
@@ -993,7 +993,7 @@ class PressureField:
         surface = surface or Surface(target, 0)
         for rope in rope_objects(scene, target):
             props = rope.ropes_rope
-            depth = props.radius*props.squish*props.tension
+            depth = props.radius*props.squish
             path = rest_path(rope)
             if depth <= 0 or len(path) < 2 or not props.generated:
                 continue

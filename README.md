@@ -1,9 +1,9 @@
-# Surface Ropes 0.12.1 — Blender 4.4
+# Surface Ropes 0.12.2 — Blender 4.4
 
 Draw single braided ropes across a mesh, create over/under junctions and overhand
 knots, and compress the underlying surface. Each rope has independent controls.
 
-[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.1.zip)
+[Download the add-on ZIP](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.12.2.zip)
 
 ## This release
 
@@ -18,7 +18,7 @@ one overhand template and three ways to place it:
    the passive rope passes straight through the expanded eye.
 
 Junction knots start with the line-knot mathematics. A smooth radial expansion
-opens the eye to the sum of the two rope radii minus 15% of the smaller radius.
+opens the eye to the sum of the two rope radii minus 30% of the smaller radius.
 This slight overlap simulates compression of the passive rope; its centreline
 stays straight. The outer hemispheres grow
 less than the eye. The template's crossing order and axial depth are retained.
@@ -104,7 +104,7 @@ surfaces meet rather than leaving a gap between circular rope envelopes.
 - **Tightness:** normal-route centreline clearance. At 0 it is one radius above
   the base surface, at 0.5 half a radius, and at 1 directly on the surface.
 - **Squishiness:** deform the target beneath the route. Maximum indentation is
-  radius × Tightness × Squishiness; the ordinary centreline stays fixed.
+  radius × Squishiness, independently of Tightness; the ordinary centreline stays fixed.
 - **Indent Width:** control the width of the deformation footprint.
 
 High Tightness can place part of the rope inside the original mesh; Squishiness

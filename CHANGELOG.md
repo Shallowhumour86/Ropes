@@ -1,3 +1,8 @@
+## 0.12.2
+
+- Increase junction-eye overlap to 30% of the smaller rope radius.
+- Make Squishiness independent of Tightness, restoring indentation when Tightness is zero. Keep surface runs fixed and spans free of indentation.
+
 ## 0.12.1
 
 - Tighten junction overhand eyes with an overlap of 15% of the smaller rope radius to suggest compression. The passive centreline stays straight and the shared knot shape is preserved.
