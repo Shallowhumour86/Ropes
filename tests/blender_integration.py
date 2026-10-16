@@ -155,6 +155,70 @@ class RopesIntegration(unittest.TestCase):
                         for x,y,_,_ in [closest_segments(points[i],points[i+1],points[j],points[j+1])])
                 self.assertAlmostEqual(gap,2*r.ropes_rope.radius,delta=.0001)
 
+    def test_crossing_apex_is_centered_on_passive_curve(self):
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        for doubled in (False,True):
+            with ropes.quiet_updates():
+                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+            ropes.rebuild(bpy.context.scene,self.target)
+            joint=self.settings.junctions[0]
+            self.assertLess(Vector(joint.position).xy.length,1e-5)
+            self.assertAlmostEqual(joint.distance_a,1.5,places=5)
+            points=ropes.visible_path(a)
+            peak=max(points,key=lambda p:p.z)
+            step=max((q-p).length for p,q in zip(ropes.rest_path(a),ropes.rest_path(a)[1:]))
+            summit=[p.x for p in points if peak.z-p.z<1e-6]
+            self.assertLess(abs(sum(summit)/len(summit)),step)
+            bottom=max(p.z for p in ropes.visible_path(b))
+            self.assertAlmostEqual(peak.z-bottom,2*a.ropes_rope.radius,delta=.001)
+
+    def test_size_one_junction_tightens_actual_curves(self):
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
+        for doubled in (False,True):
+            with ropes.quiet_updates():
+                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
+                a.ropes_rope.knot_size=1
+            ropes.rebuild(bpy.context.scene,self.target)
+            surface=Surface(self.target,1)
+            loose={r.name:ropes.display_path(bpy.context.scene,r,surface,ropes.rest_path(r)) for r in (a,b)}
+            station=ropes.knot_records(bpy.context.scene,a)[0]['station']
+            ids=[i for i,s in enumerate(loose[a.name][1]) if abs(s-station)<1e-6]
+            before=[p.copy() for p in loose[a.name][0]]
+            passive_before=[p.copy() for p in loose[b.name][0]]
+            ropes.snug_junction_curves(bpy.context.scene,surface,loose)
+            # Seating translates the passive core without bending it.
+            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
+            core=[p for p,s in zip(loose[b.name][0],loose[b.name][1]) if abs(s-passive_station)<1e-6]
+            self.assertLess(max(p.z for p in core)-min(p.z for p in core),1e-5)
+            # The occupied cross-section shrinks while the straight support
+            # and the entry endpoints remain fixed.
+            spread=lambda pts:sum(p.x*p.x for i,p in enumerate(pts) if i in ids)
+            self.assertLess(spread(loose[a.name][0]),spread(before))
+            for r in (a,b):
+                self.assertEqual(loose[r.name][0][0],before[0] if r==a else passive_before[0])
+            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
+            pp,ss=loose[b.name]
+            rods=[(pp[i],pp[i+1]) for i in range(len(pp)-1)
+                  if abs(ss[i]-passive_station)<1e-6 and abs(ss[i+1]-passive_station)<1e-6]
+            gap=min(ropes.point_segment_distance(loose[a.name][0][i],p,q) for i in ids for p,q in rods)
+            self.assertAlmostEqual(gap,2*a.ropes_rope.radius,delta=.001)
+            groups=[];group=[]
+            for i in ids:
+                if group and i!=group[-1]+1:groups.append(group);group=[]
+                group.append(i)
+            groups.append(group)
+            for group in groups:
+                core=[loose[a.name][0][i] for i in group]
+                self.assertEqual(knot_determinant(core),3)
+            if doubled:
+                left,right=([loose[a.name][0][i] for i in group] for group in groups)
+                distance=min((x-y).length for p,q in zip(left,left[1:]) for u,v in zip(right,right[1:])
+                             for x,y,_,_ in [closest_segments(p,q,u,v)])
+                self.assertGreater(distance,a.ropes_rope.radius*1.95)
+
     def test_manual_knots_and_extension_preserve_station(self):
         r = self.rope((-1.5, 0, 0), (1, 0, 0))
         ropes.knot_at(bpy.context.scene, r, .65)
@@ -511,7 +575,7 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.doubled = True
         path = ropes.visible_path(r)
         self.assertGreater(cumulative(path)[-1], original*2)
-        separation = r.ropes_rope.radius*2.02*r.ropes_rope.double_spacing
+        separation = r.ropes_rope.radius*2*r.ropes_rope.double_spacing
         self.assertAlmostEqual((path[0]-path[-1]).length, separation, places=5)
         self.assertAlmostEqual(path[0].x, 1, places=5)
         self.assertAlmostEqual(path[-1].x, 1, places=5)
@@ -713,7 +777,7 @@ class RopesIntegration(unittest.TestCase):
         tangents=[(b-a).normalized() for a,b in zip(points,points[1:]) if a.x>-.9 and b.x>-.9]
         self.assertTrue(all(abs(t.x)>.99 for t in tangents))
         # Contact resolution must not squeeze the two runs into the same groove.
-        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2.02,places=4)
+        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2,places=4)
         for p in points:
             if p.x>-.9:
                 self.assertLessEqual(abs(p.z-ropes.curve_height(r)),1e-5)
@@ -757,7 +821,7 @@ class RopesIntegration(unittest.TestCase):
         r.ropes_rope.double_spacing=1
         points=ropes.visible_path(r)
         self.assertEqual(r.ropes_rope.double_spacing,1)
-        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2.02,places=5)
+        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2,places=5)
         r.ropes_rope.double_spacing=0
         self.assertEqual(r.ropes_rope.double_spacing,1)
 
@@ -1128,7 +1192,7 @@ class RopesIntegration(unittest.TestCase):
             # Grounding moves both components together; the passive section
             # retains its straight shape through the eye at the new height.
             self.assertLess(max(p.z for p in passive_core)-min(p.z for p in passive_core),1e-5)
-            expected=b.ropes_rope.radius*1.01 if doubled else 0
+            expected=b.ropes_rope.radius if doubled else 0
             left,right=min(p.x for p in passive_core),max(p.x for p in passive_core)
             self.assertAlmostEqual(right-left,expected*2,places=5)
             self.assertTrue(all(min(abs(p.x-left),abs(p.x-right))<1e-5 for p in passive_core))

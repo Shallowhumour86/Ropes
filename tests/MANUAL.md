@@ -174,3 +174,12 @@ doubled/single and doubled/doubled. Swap over/under, change each rope's Tightnes
 independently, then rebuild. The upper runs should touch the passive runs without
 an extra bundle-height gap. Repeat at a self-crossing and on a curved target.
 Existing doubled spacing and junction knots should retain their shape.
+
+## Centred crossings and diameter spacing (0.11.0)
+
+Rebuild existing scenes. Inspect single and doubled overpasses from the side:
+the apex should be over the passive rope, touching it. At Run Spacing 1 the
+paired centre curves should be exactly one rope diameter apart. At Knot Size 1,
+inspect the junction eye from several angles; active curves should fit closely
+around the passive rope, preserve their crossings and rest on the target.
+Repeat with different rope widths, a self-crossing and a curved surface.

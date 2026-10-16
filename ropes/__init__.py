@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 10, 1),
+    'version': (0, 11, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
@@ -184,7 +184,7 @@ class ROPES_PG_Rope(bpy.types.PropertyGroup):
     active_knot: IntProperty(default=0, min=0)
     doubled: BoolProperty(name='Doubled Rope', default=False, update=rope_width_update)
     double_spacing: FloatProperty(name='Run Spacing', default=1, min=1, max=5, update=rope_width_update,
-                                 description='Run separation multiplier: 1 places the ropes closely together')
+                                 description='Run separation multiplier: 1 separates run centres by exactly one rope diameter')
     radius: FloatProperty(name='Width (Radius)', default=.025, min=.001, soft_max=.2,
                           subtype='DISTANCE', update=rope_width_update)
     subdivisions: IntProperty(name='Routing Detail', default=2, min=0, max=6,
@@ -531,7 +531,7 @@ def refresh_render(scene, target):
 
 def envelope_radius(rope):
     props = rope.ropes_rope
-    return props.radius*(1+1.01*props.double_spacing) if props.doubled else props.radius
+    return props.radius*(1+props.double_spacing) if props.doubled else props.radius
 
 
 
@@ -625,7 +625,7 @@ def fit_junction_runs(surface,curves,active,passive,normal,axis):
     rods=[(lane[0],lane[-1]) for lane in runs(passive,curves[1])]
     origin=(curves[1][0]+curves[1][-1])/2
     axis=axis.normalized()
-    goal=(active.ropes_rope.radius+passive.ropes_rope.radius)*1.02
+    goal=(active.ropes_rope.radius+passive.ropes_rope.radius)
     for _ in range(16):
         lanes=runs(active,body)
         shifts=[]
@@ -700,7 +700,7 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             curves=[junction_points(center,frame,active_tangent,normal,envelope_radius(active),
                                     envelope_radius(passive),component,kind,active.ropes_rope.knot_size,
                                     active_radius=active.ropes_rope.radius,passive_radius=passive.ropes_rope.radius,
-                                    passive_half=passive.ropes_rope.radius*1.01*passive.ropes_rope.double_spacing if passive.ropes_rope.doubled else 0)
+                                    passive_half=passive.ropes_rope.radius*passive.ropes_rope.double_spacing if passive.ropes_rope.doubled else 0)
                     for component in (0,1)]
             if kind=='OVERHAND':
                 curves[0]=fit_junction_runs(surface,curves,active,passive,normal,frame)
@@ -917,6 +917,84 @@ def separate_knot_leads(scene,target,surface,displays):
             break
 
 
+def snug_junction_curves(scene,surface,displays):
+    """Tighten actual knot runs without using a bundle envelope as clearance."""
+    import numpy as np
+    for joint in scene.ropes_settings.junctions:
+        if not joint.is_knot:
+            continue
+        active=joint.rope_a if junction_active_a(joint) else joint.rope_b
+        passive=joint.rope_b if junction_active_a(joint) else joint.rope_a
+        if active.name not in displays or passive.name not in displays:
+            continue
+        ast=joint.distance_a if junction_active_a(joint) else joint.distance_b
+        pst=joint.distance_b if junction_active_a(joint) else joint.distance_a
+        points,stations=displays[active.name];below,bstations=displays[passive.name]
+        ids=[i for i,s in enumerate(stations) if abs(s-ast)<1e-6]
+        segments=[(below[i],below[i+1]) for i,s in enumerate(bstations[:-1])
+                  if abs(s-pst)<1e-6 and abs(bstations[i+1]-pst)<1e-6]
+        if len(ids)<3 or not segments:
+            continue
+        radius=active.ropes_rope.radius
+        goal=radius+passive.ropes_rope.radius
+        original=np.array([tuple(points[i]) for i in ids],dtype=float)
+        p=original.copy();free=np.ones(len(ids),dtype=bool)
+        groups=[];start=0
+        for k in range(1,len(ids)+1):
+            if k==len(ids) or ids[k]!=ids[k-1]+1:
+                groups.append((start,k));free[start:start+3]=False;free[max(start,k-3):k]=False;start=k
+        arcs=np.zeros(len(ids))
+        for a,b in groups:
+            arcs[a:b]=np.r_[0,np.cumsum(np.linalg.norm(np.diff(original[a:b],axis=0),axis=1))]
+        labels=np.zeros(len(ids),dtype=int)
+        for label,(a,b) in enumerate(groups):labels[a:b]=label
+        valid=(np.abs(arcs[:,None]-arcs[None,:])>radius*5)|(labels[:,None]!=labels[None,:])
+        np.fill_diagonal(valid,False)
+        aa=np.array([tuple(a) for a,b in segments]);edges=np.array([tuple(b-a) for a,b in segments])
+        lengths=np.einsum('ij,ij->i',edges,edges)
+        origin=aa.mean(axis=0);axis=np.array(tuple((segments[0][1]-segments[0][0]).normalized()))
+        normal=np.array(tuple(surface.normal_at(Vector(origin))))
+        supported=not (span_at(active,ast) or span_at(passive,pst))
+        contacts=[surface.project(Vector(v))[:2] for v in original]
+        support=np.array([tuple(co) for co,n in contacts])
+        normals=np.array([tuple(n) for co,n in contacts])
+        size=active.ropes_rope.knot_size
+        for iteration in range(200):
+            if iteration<70 and size<1.999:
+                radial=p-origin-np.outer((p-origin)@axis,axis)
+                p[free]-=radial[free]*(.006*(2-size))
+            delta=p[:,None,:]-p[None,:,:]
+            distance=np.linalg.norm(delta,axis=2)
+            overlap=np.where(valid,np.maximum(0,radius*2.005-distance),0)
+            correction=delta*(overlap/np.maximum(distance,1e-12))[:,:,None]
+            count=np.maximum(1,np.sum(overlap>0,axis=1))
+            move=correction.sum(axis=1)/count[:,None]*.65
+            p[free]+=move[free]
+            relative=p[:,None,:]-aa[None,:,:]
+            t=np.clip(np.einsum('ijk,jk->ij',relative,edges)/np.maximum(lengths,1e-16),0,1)
+            delta=relative-t[:,:,None]*edges
+            distance=np.linalg.norm(delta,axis=2)
+            nearest=np.argmin(distance,axis=1);row=np.arange(len(p))
+            gap=distance[row,nearest];d=delta[row,nearest]
+            correction=d*(np.maximum(0,goal-gap)/np.maximum(gap,1e-12))[:,None]
+            p[free]+=correction[free]
+            if supported:
+                shift=np.maximum(0,radius*1.0001-np.einsum('ij,ij->i',p-support,normals))
+                p[free]+=shift[free,None]*normals[free]
+        for i,value in zip(ids,p):points[i]=Vector(value)
+        if supported:
+            passive_core=[point for point,s in zip(below,bstations) if abs(s-pst)<1e-6]
+            offset=_geometry.junction_support_offset(surface,Vector(normal),
+                         [([points[i] for i in ids],radius),(passive_core,passive.ropes_rope.radius)],
+                         max(envelope_radius(active),envelope_radius(passive))*8*size)
+            for owner,station in ((active,ast),(passive,pst)):
+                body,ss=displays[owner.name]
+                extent=max(envelope_radius(active),envelope_radius(passive))*16*size
+                for i,s in enumerate(ss):
+                    blend=max(0,1-abs(s-station)/extent)
+                    body[i]+=offset*(blend*blend*(3-2*blend))
+
+
 def fit_crossing_curves(scene, surface, displays, paths):
     """Fit overpasses to physical run curves, independent of bundle width/height."""
     for joint in scene.ropes_settings.junctions:
@@ -931,8 +1009,17 @@ def fit_crossing_curves(scene, surface, displays, paths):
         goal=upper.ropes_rope.radius+lower.ropes_rope.radius
         # Width determines the transition footprint, never vertical clearance.
         span=max(envelope_radius(upper),envelope_radius(lower))*6
-        normal=surface.normal_at(sample_at(paths[upper.name],cumulative(paths[upper.name]),us)[0])
-        weights=[.5*(1+math.cos(math.pi*abs(s-us)/span)) if abs(s-us)<span else 0 for s in stations]
+        crossing,ut=sample_at(paths[upper.name],cumulative(paths[upper.name]),us)
+        _,lt=sample_at(paths[lower.name],cumulative(paths[lower.name]),ls)
+        normal=surface.normal_at(crossing)
+        sine=max(.1,ut.normalized().cross(lt.normalized()).length)
+        upper_half=upper.ropes_rope.radius*upper.ropes_rope.double_spacing if upper.ropes_rope.doubled else 0
+        lower_half=lower.ropes_rope.radius*lower.ropes_rope.double_spacing if lower.ropes_rope.doubled else 0
+        plateau=min(span*.6,(lower_half+upper_half*abs(ut.normalized().dot(lt.normalized())))/sine)
+        # Paired passive runs need a short level contact region, rather than
+        # an oversized peak suspended above the space between their curves.
+        weights=[.5*(1+math.cos(math.pi*max(0,abs(s-us)-plateau)/(span-plateau)))
+                 if abs(s-us)<span else 0 for s in stations]
         upper_segments=[i for i in range(len(points)-1) if weights[i]>0 or weights[i+1]>0]
         lower_segments=[i for i in range(len(below)-1)
                         if min(abs(lower_stations[i]-ls),abs(lower_stations[i+1]-ls))<span]
@@ -967,6 +1054,7 @@ def render_ropes(scene, target, surface, ropes, paths):
     displays = {rope.name: display_path(scene, rope, surface, paths[rope.name])
                 for rope in ropes if rope.name in paths}
     fit_crossing_curves(scene,surface,displays,paths)
+    snug_junction_curves(scene,surface,displays)
     separate_knot_leads(scene,target,surface,displays)
     pressure = PressureField(scene, target, surface, displays)
     helpers = {(o.get('ropes_owner'), o.get('ropes_strand')): o for o in scene.objects

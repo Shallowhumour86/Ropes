@@ -1,3 +1,15 @@
+## 0.11.0
+
+- Select the closest crossing candidate within each detection cluster so the
+  overpass apex lines up with the passive curve rather than its detection band.
+- Remove the doubled-run padding: spacing 1 is exactly 2 × rope radius. Apply
+  the same convention to bundle footprints, knot fitting and upgrade checks.
+- Fit the knot eye to the exact sum of active/passive radii. Tighten actual knot
+  runs with capsule and nonlocal self-contact constraints rather than scaling
+  the whole bundle. Preserve knot ports, then seat the body and blend its leads.
+- Add apex alignment and snug knot regression checks alongside existing
+  topology, unequal width, surface seating and installation tests.
+
 ## 0.10.1
 
 - Fit ordinary overpasses against actual single or doubled run curves. Their

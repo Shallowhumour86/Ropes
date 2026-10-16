@@ -1,4 +1,4 @@
-# Surface Ropes 0.10.1 — Blender 4.4
+# Surface Ropes 0.11.0 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.10.1](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.10.1.zip).
+[Download version 0.11.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.11.0.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -22,6 +22,22 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 **Path Smoothing** is adjusted. Click **Rebuild Ropes** after upgrading to update existing knot shapes and their
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
+
+## New in 0.11.0
+
+- Crossing detection chooses the closest intersection rather than the first
+  nearby segment, centring the overpass apex on the passive rope.
+- Run Spacing **1** means exactly one rope diameter between run centre curves.
+- Size-1 junction knots tighten the actual run curves around the passive rope
+  and against their own nonlocal crossings. The body is seated again after
+  tightening, with smooth lead transitions. Larger Knot Size values loosen it.
+- Contact targets use actual rope radii, including unequal widths and doubled
+  runs. A knot needs extra room only where rope passes over itself.
+
+Install the update and click **Rebuild Ropes**. Saved control values are retained.
+
+[Crossings](dist/surface-ropes-0.11.0-crossings.png) ·
+[Tighter junction knots](dist/surface-ropes-0.11.0-junction.png)
 
 ## New in 0.10.1
 
@@ -215,8 +231,8 @@ Enable **Doubled Rope** on an existing or new rope. Both runs follow the same
 waypoints with an offset, and a continuous folded end joins them at the first
 waypoint. Each run retains the active rope's radius and three-strand construction.
 **Run Spacing** is a separation multiplier, with a default and minimum of **1**.
-At 1 the centers are 2.02 radii apart, leaving only a small clearance between the
-runs. At 2 the separation doubles. Knot
+At 1 the centre curves are exactly two radii (one rope diameter) apart.
+At 2 the separation doubles. Knot
 geometry expands to accommodate the pair. Right-clicking either run edits the
 same logical knot station. This is a paired visual rope, not a simulated tying
 procedure, hitch, or physical constraint. Keep waypoints away from narrow mesh

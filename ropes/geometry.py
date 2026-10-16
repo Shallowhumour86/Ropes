@@ -369,11 +369,16 @@ def crossings(paths, radius):
                     sa = la[i] + s*u.length
                     sb = lb[j] + t*v.length
                     center = (x+y)/2
-                    if any(f['a'] == name_a and f['b'] == name_b and
-                           abs(f['sa']-sa) < radius*6 and abs(f['sb']-sb) < radius*6
-                           for f in found):
+                    candidate=dict(a=name_a,b=name_b,sa=sa,sb=sb,center=center,ia=i,ib=j,ta=s,tb=t,gap=(x-y).length)
+                    match=next((f for f in found if f['a']==name_a and f['b']==name_b
+                                and abs(f['sa']-sa)<radius*6 and abs(f['sb']-sb)<radius*6),None)
+                    if match is not None:
+                        # Choose the actual intersection, not the first nearby
+                        # segment to enter the detection envelope.
+                        if candidate['gap']<match['gap']-1e-9:
+                            match.update(candidate)
                         continue
-                    found.append(dict(a=name_a, b=name_b, sa=sa, sb=sb, center=center, ia=i, ib=j, ta=s, tb=t))
+                    found.append(candidate)
     return found
 
 
@@ -453,7 +458,7 @@ def doubled_path(surface, points, stations, radius, spacing=1, free=None, normal
     """One continuous folded rope: two runs, joined by a bight at the start."""
     lanes = [[], []]
     last_side = None
-    half = radius*1.01*spacing
+    half = radius*spacing
     physical_lengths=cumulative(points)
     curve_mode=[surface_refs is not None and surface_refs[i] is not None and len(surface_refs[i])==3 for i in range(len(points))]
     for i, point in enumerate(points):
