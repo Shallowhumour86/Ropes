@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 11, 1),
+    'version': (0, 12, 0),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
@@ -29,13 +29,17 @@ from bpy_extras import view3d_utils
 # Blender state, so it is safe to refresh before importing this version's helpers.
 from . import geometry as _geometry
 importlib.invalidate_caches()
+if hasattr(_geometry,'doubled_path'):delattr(_geometry,'doubled_path')
 importlib.reload(_geometry)
+for _retired_name in ('fit_junction_runs','snug_junction_curves','separate_knot_leads'):
+    globals().pop(_retired_name,None)
 
 from .geometry import (Surface, cumulative, crossings, knot_points,
-                       point_segment_distance, sample_at, resample, three_strands, strand_tube, doubled_path, bezier_join, spanning_route, segment_clear, junction_points, fair_contact_path, contact_correction, round_bends, align_knot_entries)
+                       point_segment_distance, sample_at, resample, three_strands, strand_tube, bezier_join, spanning_route, segment_clear, junction_points, fair_contact_path, contact_correction, round_bends, align_knot_entries)
 
 
 _UPDATING = 0
+SCHEMA_VERSION = 12
 
 
 @contextmanager
@@ -93,12 +97,28 @@ def mesh_poll(self, obj):
     return obj.type == 'MESH' and not obj.get('ropes_generated')
 
 
-KNOT_TYPES = (
-    ('OVERHAND', 'Compact Overhand', 'Compact open trefoil with entering and exiting leads'),
-    ('FIGURE_EIGHT', 'Figure Eight', 'Open figure-eight stopper knot'),
-    ('TREFOIL', 'Legacy Trefoil', 'Original large trefoil display'),
-)
-KNOT_CHOICES = (('INHERIT', 'Rope Default', "Use this rope's default knot style"),)+KNOT_TYPES
+def centre_material():
+    mat=bpy.data.materials.get('Surface Ropes · Centre Curve')
+    if mat is None:
+        mat=bpy.data.materials.new('Surface Ropes · Centre Curve')
+        mat.diffuse_color=(.015,.015,.015,1)
+    return mat
+
+
+def curve_view_update(self,context):
+    if context is None:return
+    mode=self.curve_view
+    for obj in context.scene.objects:
+        if obj.get('ropes_helper'):
+            obj.hide_set(mode=='CURVES');obj.hide_render=mode=='CURVES'
+        elif obj.type=='CURVE' and obj.ropes_rope.enabled:
+            scale=max(abs(sum(obj.matrix_world.to_scale())/3),1e-6)
+            obj.data.bevel_depth=obj.ropes_rope.radius*(.06 if mode=='CURVES' else .025)/scale if mode!='ROPE' else 0
+            obj.show_in_front=mode!='ROPE'
+
+
+KNOT_TYPES = (('OVERHAND','Overhand','One shared overhand template'),)
+KNOT_CHOICES = KNOT_TYPES
 
 
 def knot_style_update(self, context):
@@ -166,7 +186,7 @@ class ROPES_PG_Anchor(bpy.types.PropertyGroup):
 class ROPES_PG_Knot(bpy.types.PropertyGroup):
     # Arc length from the start, so extension does not move existing knots.
     distance: FloatProperty(min=0)
-    kind: EnumProperty(name='Knot Type', items=KNOT_CHOICES, default='INHERIT', update=knot_style_update)
+    kind: EnumProperty(name='Knot Type', items=KNOT_CHOICES, default='OVERHAND', update=knot_style_update)
 
 
 class ROPES_PG_Rope(bpy.types.PropertyGroup):
@@ -182,9 +202,6 @@ class ROPES_PG_Rope(bpy.types.PropertyGroup):
     knot_type: EnumProperty(name='Default Knot Type', items=KNOT_TYPES, default='OVERHAND', update=rope_render_update)
     knot_size: FloatProperty(name='Knot Size', default=1, min=1, max=2, update=rope_render_update)
     active_knot: IntProperty(default=0, min=0)
-    doubled: BoolProperty(name='Doubled Rope', default=False, update=rope_width_update)
-    double_spacing: FloatProperty(name='Run Spacing', default=1, min=1, max=5, update=rope_width_update,
-                                 description='Run separation multiplier: 1 separates run centres by exactly one rope diameter')
     radius: FloatProperty(name='Width (Radius)', default=.025, min=.001, soft_max=.2,
                           subtype='DISTANCE', update=rope_width_update)
     subdivisions: IntProperty(name='Routing Detail', default=2, min=0, max=6,
@@ -208,7 +225,7 @@ class ROPES_PG_Junction(bpy.types.PropertyGroup):
     distance_a: FloatProperty()
     distance_b: FloatProperty()
     is_knot: BoolProperty(default=False)
-    kind: EnumProperty(name='Junction Knot Type', items=KNOT_CHOICES, default='INHERIT', update=knot_style_update)
+    kind: EnumProperty(name='Junction Knot Type', items=KNOT_CHOICES, default='OVERHAND', update=knot_style_update)
     over_a: BoolProperty(default=True)
     knot_a: BoolProperty(default=True)
     knot_owner_set: BoolProperty(default=False)
@@ -225,14 +242,15 @@ class ROPES_PG_Settings(bpy.types.PropertyGroup):
     strand_pitch: FloatProperty(name='Twist Pitch', default=12, min=6, max=30)
     show_defaults: BoolProperty(name='New Rope Defaults', default=False)
     waypoint_mode: BoolProperty(name='Waypoint Mode', default=False, description='Place a draft first, then use Generate Rope')
+    curve_view: EnumProperty(name='Display',items=(('ROPE','Rope','Braided rope'),
+                            ('CURVES','Centre Curves','Hide strands and inspect the generated Bezier centre curves'),
+                            ('BOTH','Rope + Curves','Overlay centre curves on the rope')),default='ROPE',update=curve_view_update)
     placement_kind: EnumProperty(name='New Waypoint Type', items=WAYPOINT_TYPES, default='NORMAL')
     show_waypoints: BoolProperty(name='Show Waypoints', default=False, update=waypoint_visibility_update)
     waypoint_size: FloatProperty(name='Waypoint Size',default=.6,min=.05,max=4,update=waypoint_display_update)
     waypoint_xray: BoolProperty(name='Waypoints Through Objects',default=False,update=waypoint_display_update)
     knot_type: EnumProperty(name='Default Knot Type', items=KNOT_TYPES, default='OVERHAND')
     knot_size: FloatProperty(name='Knot Size', default=1, min=1, max=2)
-    doubled: BoolProperty(name='Doubled Rope', default=False)
-    double_spacing: FloatProperty(name='Run Spacing', default=1, min=1, max=5)
     squish: FloatProperty(name='Squishiness', default=0, min=0, max=1)
     tension: FloatProperty(name='Tightness', default=.5, min=0, max=1)
     falloff: FloatProperty(name='Indent Width', default=4, min=1, max=20)
@@ -242,40 +260,44 @@ class ROPES_PG_Settings(bpy.types.PropertyGroup):
 
 
 COPY_SETTINGS = ('radius', 'subdivisions', 'squish', 'tension', 'falloff', 'smoothing', 'strand_pitch',
-                 'knot_type', 'knot_size', 'doubled', 'double_spacing')
+                 'knot_size')
 
 
-def migrate_rope(scene, rope):
-    props = rope.ropes_rope
-    if 'ropes_spacing_units' not in rope:
-        with quiet_updates():
-            if 'double_spacing' in props:
-                props.double_spacing = max(1, props.double_spacing/2.02)
-            rope['ropes_spacing_units'] = 2
-    if props.initialized:
-        return
+def migrate_rope(scene,rope):
+    props=rope.ropes_rope
     with quiet_updates():
-        for name in COPY_SETTINGS:
-            setattr(props, name, getattr(scene.ropes_settings, name))
-        # Retain the original routing of a 0.1 scene until smoothing is requested.
-        props.smoothing = 0
-        props.initialized = True
+        if not props.initialized:
+            for name in COPY_SETTINGS:setattr(props,name,getattr(scene.ropes_settings,name))
+            props.smoothing=0
+            props.initialized=True
+        # Retire saved controls as well as their visible UI. Anchors and knot
+        # stations are retained when old folded ropes become single ropes.
+        for name in ('doubled','double_spacing'):
+            if name in props:del props[name]
+        props.knot_type='OVERHAND'
+        for knot in props.knots:knot.kind='OVERHAND'
+        rope['ropes_schema']=SCHEMA_VERSION
 
 
 @persistent
 def migrate_on_load(_):
+    pending=[]
     with quiet_updates():
         for scene in bpy.data.scenes:
-            if 'ropes_spacing_units' not in scene:
-                old=any(o.type=='CURVE' and o.ropes_rope.enabled and 'ropes_spacing_units' not in o for o in scene.objects)
-                if old and 'double_spacing' in scene.ropes_settings:
-                    scene.ropes_settings.double_spacing=max(1,scene.ropes_settings.double_spacing/2.02)
-                scene['ropes_spacing_units']=2
+            for name in ('doubled','double_spacing'):
+                if name in scene.ropes_settings:del scene.ropes_settings[name]
+            scene.ropes_settings.knot_type='OVERHAND'
+            for joint in scene.ropes_settings.junctions:joint.kind='OVERHAND'
             for obj in scene.objects:
-                if obj.type == 'CURVE' and obj.ropes_rope.enabled:
-                    migrate_rope(scene, obj)
+                if obj.type=='CURVE' and obj.ropes_rope.enabled:
+                    if obj.get('ropes_schema',0)<SCHEMA_VERSION and obj.ropes_rope.target:
+                        pair=(scene,obj.ropes_rope.target)
+                        if pair not in pending:pending.append(pair)
+                    migrate_rope(scene,obj)
+    for scene,target in pending:rebuild(scene,target)
     for scene in bpy.data.scenes:
         waypoint_display_update(scene.ropes_settings,SimpleNamespace(scene=scene))
+        curve_view_update(scene.ropes_settings,SimpleNamespace(scene=scene))
 
 
 
@@ -344,7 +366,7 @@ def new_curve(scene, target, name):
     data.resolution_u = 1
     data.bevel_resolution = 3
     data.use_fill_caps = True
-    data.materials.append(material())
+    data.materials.append(centre_material())
     obj = bpy.data.objects.new(name, data)
     generated_collection(scene).objects.link(obj)
     obj['ropes_generated'] = True
@@ -356,14 +378,16 @@ def new_curve(scene, target, name):
 
 def set_curve(obj, points, radius, cyclic=False):
     obj.data.splines.clear()
+    obj.data.materials.clear()
+    obj.data.materials.append(centre_material())
     if len(points) < 2:
         return
     inverse = obj.parent.matrix_world.inverted_safe()
-    spline = obj.data.splines.new('POLY')
-    spline.points.add(len(points)-1)
-    for p, world in zip(spline.points, points):
-        local = inverse @ world
-        p.co = (*local, 1)
+    spline = obj.data.splines.new('BEZIER')
+    spline.bezier_points.add(len(points)-1)
+    for p, world in zip(spline.bezier_points, points):
+        p.co = inverse @ world
+        p.handle_left_type = p.handle_right_type = 'VECTOR'
     spline.use_cyclic_u = cyclic
     # Blender's bevel is in object space. Uniform scale is supported exactly.
     scale = sum(obj.parent.matrix_world.to_scale())/3
@@ -406,7 +430,7 @@ def new_rope(scene, target):
         for name in COPY_SETTINGS:
             setattr(obj.ropes_rope, name, getattr(scene.ropes_settings, name))
         obj.ropes_rope.initialized = True
-    obj['ropes_spacing_units'] = 2
+    obj['ropes_schema'] = SCHEMA_VERSION
     obj.ropes_rope.generated = not scene.ropes_settings.waypoint_mode
     obj.ropes_rope.enabled = True
     obj.ropes_rope.target = target
@@ -424,7 +448,9 @@ def rest_path(rope):
 def visible_path(rope):
     if not rope.data.splines:
         return []
-    return [rope.matrix_world @ Vector(p.co[:3]) for p in rope.data.splines[0].points]
+    spline=rope.data.splines[0]
+    points=spline.bezier_points if spline.type=='BEZIER' else spline.points
+    return [rope.matrix_world @ Vector(p.co[:3]) for p in points]
 
 
 def rebuild(scene, target, repath=True):
@@ -510,7 +536,7 @@ def rebuild(scene, target, repath=True):
             match = min(matches, key=lambda o: (target.matrix_world @ o['p']-crossing['center']).length)
             with quiet_updates():
                 j.is_knot, j.uid, j.over_a = match['knot'], match['uid'], match['over_a']
-                j.kind = match['kind']
+                j.kind = 'OVERHAND'
                 j.knot_a,j.knot_owner_set=match['knot_a'],match['knot_owner_set']
     if active_uid:
         for i, junction in enumerate(settings.junctions):
@@ -531,7 +557,7 @@ def refresh_render(scene, target):
 
 def envelope_radius(rope):
     props = rope.ropes_rope
-    return props.radius*(1+props.double_spacing) if props.doubled else props.radius
+    return props.radius
 
 
 
@@ -598,14 +624,14 @@ def knot_extent(record,rope):
 
 def knot_records(scene, rope):
     props=rope.ropes_rope
-    records=[dict(station=k.distance,kind=props.knot_type if k.kind=='INHERIT' else k.kind,junction=None,component=0)
+    records=[dict(station=k.distance,kind='OVERHAND',junction=None,component=0)
              for k in props.knots]
     for j in scene.ropes_settings.junctions:
         if not j.is_knot or not j.rope_a or not j.rope_b:
             continue
         active_a=junction_active_a(j)
         owner=j.rope_a if active_a else j.rope_b
-        kind=owner.ropes_rope.knot_type if j.kind=='INHERIT' else j.kind
+        kind='OVERHAND'
         if j.rope_a==rope:
             records.append(dict(station=j.distance_a,kind=kind,junction=j,component=0 if active_a else 1))
         if j.rope_b==rope:
@@ -613,66 +639,48 @@ def knot_records(scene, rope):
     return sorted(records,key=lambda r:r['station'])
 
 
-def fit_junction_runs(surface,curves,active,passive,normal,axis):
-    """Clear the actual passive runs without inflating the entire knot eye."""
-    def runs(owner,curve):
-        if not owner.ropes_rope.doubled:
-            return [curve]
-        physical,_=doubled_path(surface,curve,[0.0]*len(curve),owner.ropes_rope.radius,
-                               owner.ropes_rope.double_spacing,normals=[normal]*len(curve),junction_stations=[0.0])
-        return [list(reversed(physical[:len(curve)])),physical[-len(curve):]]
-    body=[p.copy() for p in curves[0]]
-    rods=[(lane[0],lane[-1]) for lane in runs(passive,curves[1])]
-    origin=(curves[1][0]+curves[1][-1])/2
-    axis=axis.normalized()
-    goal=(active.ropes_rope.radius+passive.ropes_rope.radius)
-    for _ in range(16):
-        lanes=runs(active,body)
-        shifts=[]
-        for i,p in enumerate(body):
-            radial=p-origin-axis*(p-origin).dot(axis)
-            radial.normalize()
-            shift=0.0
-            for lane in lanes:
-                for a,b in rods:
-                    delta=b-a
-                    t=max(0,min(1,(lane[i]-a).dot(delta)/delta.length_squared)) if delta.length_squared else 0
-                    separation=lane[i]-a-delta*t
-                    gap=separation.length
-                    if gap<goal:
-                        derivative=radial.dot(separation.normalized()) if gap>1e-8 else 1
-                        shift=max(shift,min(active.ropes_rope.radius*.4,(goal-gap)/max(.2,derivative)))
-            shifts.append(shift)
-        if max(shifts)<active.ropes_rope.radius*1e-5:
-            break
-        spread=[max(value,(shifts[max(0,i-1)]+value*2+shifts[min(i+1,len(body)-1)])/4) for i,value in enumerate(shifts)]
-        for i,p in enumerate(body):
-            radial=p-origin-axis*(p-origin).dot(axis)
-            body[i]=p+radial.normalized()*spread[i]
-    return body
+def rigid_knot_offset(surface,normal,supports,settle=True):
+    """Seat both components with a common translation, never deform the eye."""
+    normal=normal.normalized();offset=Vector()
+    radius=max(r for curve,r in supports)
+    for _ in range(160):
+        shift=0.0
+        for curve,r in supports:
+            for p in curve:
+                point=p+offset;co,n,_=surface.project(point)
+                signed=(point-co).dot(n)
+                if signed<r*1.05:
+                    shift=max(shift,min(radius*2,(r*1.05-signed)/max(.2,n.dot(normal))))
+        if shift<radius*1e-5:break
+        offset+=normal*shift
+    else:raise ValueError('Knot cannot seat on this surface; move its waypoint into a clearer area')
+    if not settle:return offset
+    translated=[([p+offset for p in curve],r) for curve,r in supports]
+    return offset+_geometry.junction_support_offset(surface,normal,translated,radius*30)
 
 
 def insert_knots(scene, surface, path, lengths, rendered, records, rope):
     if not records:
         return rendered, lengths
     props=rope.ropes_rope
-    # A folded bundle no longer scales the entire knot by its full outer width.
-    compact=props.radius*(1+.10*props.double_spacing) if props.doubled else props.radius
+    compact=props.radius
     body_radius=compact*props.knot_size
     radius = rope.ropes_rope.radius
     result, stations = [], []
     i = 0
-    for record in records:
+    for record_index,record in enumerate(records):
         station,kind=record['station'],record['kind']
         joint=record['junction']
         body_radius=compact*props.knot_size
         if joint:
             active=joint.rope_a if junction_active_a(joint) else joint.rope_b
             passive=joint.rope_b if junction_active_a(joint) else joint.rope_a
-            body_radius=max(envelope_radius(active),envelope_radius(passive))*active.ropes_rope.knot_size*2
+            body_radius=(active.ropes_rope.radius+passive.ropes_rope.radius)*active.ropes_rope.knot_size
         station = max(0, min(lengths[-1], station))
-        lead_span=body_radius*(7 if joint else (4.5 if props.doubled and kind=="OVERHAND" else 6))
+        lead_span=body_radius*(10 if joint else 6)
         low, high = max(0, station-lead_span), min(lengths[-1], station+lead_span)
+        if record_index:low=max(low,(station+records[record_index-1]['station'])/2)
+        if record_index+1<len(records):high=min(high,(station+records[record_index+1]['station'])/2)
         while i < len(lengths) and lengths[i] < low:
             result.append(rendered[i])
             stations.append(lengths[i])
@@ -690,40 +698,21 @@ def insert_knots(scene, surface, path, lengths, rendered, records, rope):
             world=joint.rope_a.ropes_rope.target.matrix_world @ Vector(joint.position)
             nearest,normal,_=surface.project(world)
             floating=span_at(joint.rope_a,joint.distance_a) or span_at(joint.rope_b,joint.distance_b)
-            center=world-normal*max(joint.rope_a.ropes_rope.radius,joint.rope_b.ropes_rope.radius)*1.05 if floating else nearest
+            center=world if floating else nearest
             passive_station=joint.distance_b if junction_active_a(joint) else joint.distance_a
             passive_path=rest_path(passive)
             frame=sample_at(passive_path,cumulative(passive_path),passive_station)[1]
             active_station=joint.distance_a if junction_active_a(joint) else joint.distance_b
             active_path=rest_path(active)
             active_tangent=sample_at(active_path,cumulative(active_path),active_station)[1]
-            curves=[junction_points(center,frame,active_tangent,normal,envelope_radius(active),
-                                    envelope_radius(passive),component,kind,active.ropes_rope.knot_size,
-                                    active_radius=active.ropes_rope.radius,passive_radius=passive.ropes_rope.radius,
-                                    passive_half=passive.ropes_rope.radius*passive.ropes_rope.double_spacing if passive.ropes_rope.doubled else 0)
+            curves=[junction_points(center,frame,active_tangent,normal,active.ropes_rope.radius,
+                                    passive.ropes_rope.radius,component,size=active.ropes_rope.knot_size)
                     for component in (0,1)]
-            if kind=='OVERHAND':
-                curves[0]=fit_junction_runs(surface,curves,active,passive,normal,frame)
-            offset=Vector()
-            if not floating:
-                supports=[]
-                for owner,curve,rest,distance in zip((active,passive),curves,(active_path,passive_path),(active_station,passive_station)):
-                    physical=curve
-                    if owner.ropes_rope.doubled:
-                        guide=surface.normal_at(sample_at(rest,cumulative(rest),distance)[0])
-                        physical,_=doubled_path(surface,curve,[0.0]*len(curve),owner.ropes_rope.radius,
-                                               owner.ropes_rope.double_spacing,normals=[guide]*len(curve),junction_stations=[0.0])
-                        # The real folded end is at the start of the rope,
-                        # not at the knot's attachment: omit this trial bight.
-                        physical=physical[:len(curve)]+physical[-len(curve):]
-                    supports.append((physical,owner.ropes_rope.radius))
-                offset=_geometry.junction_support_offset(surface,normal,supports,
-                        max(envelope_radius(active),envelope_radius(passive))*8*active.ropes_rope.knot_size)
+            supports=[(curve,owner.ropes_rope.radius) for owner,curve in zip((active,passive),curves)]
+            offset=rigid_knot_offset(surface,normal,supports,settle=not floating)
             loop=[p+offset for p in curves[record['component']]]
-        elif kind == 'TREFOIL':
-            loop = knot_points(center+normal*radius, tangent, normal, body_radius*1.5, kind)
         else:
-            loop = knot_points(center, tangent, normal, body_radius, kind)
+            loop=knot_points(center,tangent,normal,body_radius)
         if not joint:
             loop=align_knot_entries(loop,tangent)
         incoming = bezier_join(result[-1], sample_at(path, lengths, low)[1],
@@ -778,7 +767,7 @@ def fillet_surface_waypoints(rope,surface,points,stations,protected):
     bounds=json.loads(rope.get('ropes_leg_bounds','[]'))
     flags=json.loads(rope.get('ropes_span_flags','[]'))
     radius=rope.ropes_rope.radius
-    reach=radius*(6 if rope.ropes_rope.doubled else 4)
+    reach=radius*4
     for leg,station in enumerate(bounds[1:-1],1):
         if flags[leg-1] or flags[leg]:
             continue
@@ -810,277 +799,17 @@ def display_path(scene, rope, surface, path):
     rendered, stations = insert_knots(scene, surface, path, lengths, rendered,
                                       knot_records(scene, rope), rope)
     records=knot_records(scene,rope)
-    constrained=[span_at(rope,s) or any(abs(s-r['station'])<1e-6 for r in records) for s in stations]
+    constrained=[span_at(rope,s) for s in stations]
     rendered=[p+contact_correction(surface,p,radius) if constrained[i] else p for i,p in enumerate(rendered)]
     protected=[any(abs(station-record['station'])<knot_extent(record,rope) for record in records) for station in stations]
     rendered,fillet_refs=fillet_surface_waypoints(rope,surface,rendered,stations,protected)
     unrounded=rendered
     # Normal routes are curves: thickness is allowed to intersect the surface.
     # Spans and knot bodies retain physical clearance.
-    if rope.ropes_rope.doubled:
-        # Guide the bundle from its underlying route, not the nearest wall to
-        # an elevated centerline: a valley has two equally near walls.
-        normals=support_normals(rope,surface,path,lengths,stations)
-        surface_refs=[]
-        arc=cumulative(rendered)
-        for i,station in enumerate(stations):
-            if span_at(rope,station) or any(abs(station-r['station'])<1e-6 for r in records):
-                surface_refs.append(None)
-                continue
-            tangent=sample_at(rendered,arc,min(arc[-1],arc[i]+radius*.5))[0]-sample_at(rendered,arc,max(0,arc[i]-radius*.5))[0]
-            if protected[i]:
-                surface_refs.append((None,tangent,None))
-                continue
-            co=fillet_refs.get(i,surface.project(sample_at(path,lengths,station)[0])[0])
-            surface_refs.append((co,tangent,rendered[i]-co))
-        rendered, stations = doubled_path(surface, rendered, stations, radius, rope.ropes_rope.double_spacing,
-                                         [span_at(rope,s) for s in stations], normals,surface_refs,[r['station'] for r in records if r['junction']])
-        rendered=[p+contact_correction(surface,p,radius) if span_at(rope,s) or any(abs(s-r['station'])<1e-6 for r in records) else p
-                  for p,s in zip(rendered,stations)]
     for i,(a,b) in enumerate(zip(rendered,rendered[1:])):
         if span_at(rope,(stations[i]+stations[i+1])/2) and not segment_clear(surface,a,b,radius*1.01):
             raise ValueError('Spanning rope cannot clear the surface at this width. Move its waypoints or reduce width.')
     return rendered, stations
-
-
-def separate_knot_leads(scene,target,surface,displays):
-    """Coupled capsule constraints keep junction entries outside both knot cores."""
-    owners={r.name:r for r in rope_objects(scene,target) if r.name in displays}
-    records={name:[r for r in knot_records(scene,owner) if r['junction']] for name,owner in owners.items()}
-    if not any(records.values()):
-        return
-    masks={name:[i not in (0,len(points)-1) and any(1e-6<abs(station-r['station'])<knot_extent(r,owners[name]) for r in records[name])
-                 for i,station in enumerate(stations)] for name,(points,stations) in displays.items()}
-    for iteration in range(64):
-        trees={}
-        lengths={}
-        for name,(points,stations) in displays.items():
-            tree=KDTree(len(points))
-            for i,p in enumerate(points):
-                tree.insert(p,i)
-            tree.balance()
-            trees[name]=tree
-            lengths[name]=cumulative(points)
-        maximum=0
-        for name,(points,stations) in displays.items():
-            radius=owners[name].ropes_rope.radius
-            for i in range(1,len(points)-1):
-                if not masks[name][i]:
-                    continue
-                for other,(body,body_stations) in displays.items():
-                    if other!=name and not any(other in (r['junction'].rope_a.name,r['junction'].rope_b.name) for r in records[name]):
-                        continue
-                    goal=(radius+owners[other].ropes_rope.radius)*1.08
-                    candidates=set()
-                    for _,j,_ in trees[other].find_range(points[i],goal*1.6):
-                        candidates.update((max(0,j-1),min(len(body)-2,j)))
-                    closest=None
-                    for j in candidates:
-                        if other==name and min(abs(lengths[name][i]-lengths[other][j]),abs(lengths[name][i]-lengths[other][j+1]))<goal*2.2:
-                            continue
-                        a,b=body[j],body[j+1]
-                        delta=b-a
-                        t=max(0,min(1,(points[i]-a).dot(delta)/delta.length_squared)) if delta.length_squared else 0
-                        separation=points[i]-a-delta*t
-                        gap=separation.length
-                        if gap<goal and (closest is None or gap<closest[0]):
-                            closest=(gap,j,t,separation)
-                    if closest is None:
-                        continue
-                    gap,j,t,separation=closest
-                    maximum=max(maximum,goal-gap)
-                    direction=separation.normalized() if gap>1e-8 else surface.normal_at(points[i])
-                    wa=1.0 if masks[other][j] else 0.0
-                    wb=1.0 if masks[other][j+1] else 0.0
-                    denominator=1+wa*(1-t)**2+wb*t*t
-                    correction=direction*min(radius*.3,(goal-gap)/denominator)
-                    points[i]+=correction
-                    if wa:
-                        body[j]-=correction*((1-t)*wa)
-                    if wb:
-                        body[j+1]-=correction*(t*wb)
-        for name,(points,stations) in displays.items():
-            radius=owners[name].ropes_rope.radius
-            arc=cumulative(points)
-            relaxed=list(points)
-            for i in range(1,len(points)-1):
-                if not masks[name][i]:
-                    continue
-                candidate=points[i]
-                if iteration<36:
-                    left=sample_at(points,arc,max(0,arc[i]-radius*.7))[0]
-                    right=sample_at(points,arc,min(arc[-1],arc[i]+radius*.7))[0]
-                    candidate=candidate.lerp((left+right)/2,.2)
-                relaxed[i]=candidate+contact_correction(surface,candidate,curve_height(owners[name]))
-            displays[name]=(relaxed,stations)
-        if iteration>=36 and maximum<min(r.ropes_rope.radius for r in owners.values())*.002:
-            break
-
-
-def snug_junction_curves(scene,surface,displays,align=True):
-    """Tighten actual knot runs without using a bundle envelope as clearance."""
-    import numpy as np
-    for joint in scene.ropes_settings.junctions:
-        if not joint.is_knot:
-            continue
-        active=joint.rope_a if junction_active_a(joint) else joint.rope_b
-        passive=joint.rope_b if junction_active_a(joint) else joint.rope_a
-        if active.name not in displays or passive.name not in displays:
-            continue
-        ast=joint.distance_a if junction_active_a(joint) else joint.distance_b
-        pst=joint.distance_b if junction_active_a(joint) else joint.distance_a
-        points,stations=displays[active.name];below,bstations=displays[passive.name]
-        ids=[i for i,s in enumerate(stations) if abs(s-ast)<1e-6]
-        segments=[(below[i],below[i+1]) for i,s in enumerate(bstations[:-1])
-                  if abs(s-pst)<1e-6 and abs(bstations[i+1]-pst)<1e-6]
-        if len(ids)<3 or not segments:
-            continue
-        radius=active.ropes_rope.radius
-        goal=radius+passive.ropes_rope.radius
-        original=np.array([tuple(points[i]) for i in ids],dtype=float)
-        p=original.copy();free=np.ones(len(ids),dtype=bool)
-        groups=[];start=0
-        for k in range(1,len(ids)+1):
-            if k==len(ids) or ids[k]!=ids[k-1]+1:
-                groups.append((start,k));free[start:start+3]=False;free[max(start,k-3):k]=False;start=k
-        arcs=np.zeros(len(ids))
-        for a,b in groups:
-            arcs[a:b]=np.r_[0,np.cumsum(np.linalg.norm(np.diff(original[a:b],axis=0),axis=1))]
-        labels=np.zeros(len(ids),dtype=int)
-        for label,(a,b) in enumerate(groups):labels[a:b]=label
-        valid=(np.abs(arcs[:,None]-arcs[None,:])>radius*5)|(labels[:,None]!=labels[None,:])
-        np.fill_diagonal(valid,False)
-        aa=np.array([tuple(a) for a,b in segments]);edges=np.array([tuple(b-a) for a,b in segments])
-        lengths=np.einsum('ij,ij->i',edges,edges)
-        origin=(aa+edges*.5).mean(axis=0);axis=np.array(tuple((segments[0][1]-segments[0][0]).normalized()))
-        normal=np.array(tuple(surface.normal_at(Vector(origin))))
-        supported=not (span_at(active,ast) or span_at(passive,pst))
-        contacts=[surface.project(Vector(v))[:2] for v in original]
-        support=np.array([tuple(co) for co,n in contacts])
-        normals=np.array([tuple(n) for co,n in contacts])
-        size=active.ropes_rope.knot_size
-        segments_idx=np.array([i for a,b in groups for i in range(a,b-1)])
-        ii,jj=np.triu_indices(len(segments_idx),1)
-        ii,jj=segments_idx[ii],segments_idx[jj]
-        mask=(labels[ii]!=labels[jj])|(np.abs(ii-jj)>1)
-        ii,jj=ii[mask],jj[mask]
-        def capsule_moves(p):
-            current_arc=np.zeros(len(p))
-            for a,b in groups:
-                current_arc[a:b]=np.r_[0,np.cumsum(np.linalg.norm(np.diff(p[a:b],axis=0),axis=1))]
-            eligible=(labels[ii]!=labels[jj])|(np.abs(current_arc[ii]-current_arc[jj])>radius*4)
-            low=np.minimum(p[:-1],p[1:]);high=np.maximum(p[:-1],p[1:])
-            near=eligible&np.all((low[ii]-high[jj]<=radius*2.002)&(low[jj]-high[ii]<=radius*2.002),axis=1)
-            ci,cj=ii[near],jj[near]
-            if len(ci)==0:return np.zeros_like(p)
-            u=p[ci+1]-p[ci];v=p[cj+1]-p[cj];w=p[ci]-p[cj]
-            aa=np.maximum(1e-16,np.einsum('ij,ij->i',u,u))
-            bb=np.einsum('ij,ij->i',u,v)
-            cc=np.maximum(1e-16,np.einsum('ij,ij->i',v,v))
-            dd=np.einsum('ij,ij->i',u,w);ee=np.einsum('ij,ij->i',v,w)
-            denominator=aa*cc-bb*bb
-            st=np.clip(np.divide(bb*ee-cc*dd,denominator,out=np.zeros_like(aa),where=denominator>1e-16),0,1)
-            tt=(bb*st+ee)/cc
-            st=np.where(tt<0,np.clip(-dd/aa,0,1),np.where(tt>1,np.clip((bb-dd)/aa,0,1),st))
-            tt=np.clip(tt,0,1)
-            delta=w+u*st[:,None]-v*tt[:,None]
-            gap=np.linalg.norm(delta,axis=1)
-            hit=(gap<radius*2.002)&(gap>1e-10)
-            i,j,t,q=ci[hit],cj[hit],st[hit],tt[hit]
-            mass=free[i]*(1-t)**2+free[i+1]*t*t+free[j]*(1-q)**2+free[j+1]*q*q
-            amount=np.minimum(radius*.15,np.maximum(0,radius*2.002-gap[hit])/np.maximum(mass,1e-12))
-            correction=delta[hit]*(amount/np.maximum(gap[hit],1e-12))[:,None]
-            moves=np.zeros_like(p);counts=np.zeros(len(p))
-            for index,weight in ((i,1-t),(i+1,t),(j,-(1-q)),(j+1,-q)):
-                np.add.at(moves,index,correction*weight[:,None])
-                np.add.at(counts,index,np.abs(weight))
-            moves/=np.maximum(1,counts)[:,None]
-            moves[~free]=0
-            return moves*.8
-        def relax(p,iterations,attract):
-            for iteration in range(iterations):
-                if attract and iteration<70 and size<1.999:
-                    radial=p-origin-np.outer((p-origin)@axis,axis)
-                    p[free]-=radial[free]*(.006*(2-size))
-                if attract:
-                    delta=p[:,None,:]-p[None,:,:]
-                    distance=np.linalg.norm(delta,axis=2)
-                    overlap=np.where(valid,np.maximum(0,radius*2.005-distance),0)
-                    correction=delta*(overlap/np.maximum(distance,1e-12))[:,:,None]
-                    count=np.maximum(1,np.sum(overlap>0,axis=1))
-                    move=correction.sum(axis=1)/count[:,None]*.65
-                    p[free]+=move[free]
-                else:
-                    p+=capsule_moves(p)
-                relative=p[:,None,:]-aa[None,:,:]
-                t=np.clip(np.einsum('ijk,jk->ij',relative,edges)/np.maximum(lengths,1e-16),0,1)
-                delta=relative-t[:,:,None]*edges
-                distance=np.linalg.norm(delta,axis=2)
-                nearest=np.argmin(distance,axis=1);row=np.arange(len(p))
-                gap=distance[row,nearest];d=delta[row,nearest]
-                correction=d*(np.maximum(0,goal-gap)/np.maximum(gap,1e-12))[:,None]
-                p[free]+=correction[free]
-                if supported:
-                    shift=np.maximum(0,radius*1.0001-np.einsum('ij,ij->i',p-support,normals))
-                    p[free]+=shift[free,None]*normals[free]
-            return p
-        p=relax(p,200,True)
-        for i,value in zip(ids,p):points[i]=Vector(value)
-        # Carry the existing knot continuously into the aligned attachment
-        # frame. Small steps with contact refits prevent a compressed doubled
-        # run from passing through another run during one large adjustment.
-        _,lead=sample_at(rest_path(active),cumulative(rest_path(active)),ast)
-        up=Vector(normal);lead=(lead-up*lead.dot(up)).normalized()
-        across=Vector(axis).cross(up).normalized();side=up.cross(lead).normalized()
-        chord=Vector();midpoint=Vector()
-        for a,b in groups:
-            delta=Vector(p[b-1]-p[a])
-            chord+=delta if delta.dot(lead)>0 else -delta
-            midpoint+=Vector(p[a]+p[b-1])/(2*len(groups))
-        denominator=chord.dot(across)*Vector(axis).dot(side)
-        if align and abs(denominator)>1e-8:
-            slope=chord.dot(side)/denominator
-            lateral=(midpoint-Vector(origin)).dot(side)/Vector(axis).dot(side)
-            intercept=lateral-slope*(midpoint-Vector(origin)).dot(across)
-            core_extent=max(abs((Vector(v)-Vector(origin)).dot(across)) for v in p)*1.1
-            reach=max(core_extent*2,max(envelope_radius(active),envelope_radius(passive))*14*size)
-            for _ in range(12):
-                for i,point in enumerate(points):
-                    x=(point-Vector(origin)).dot(across)
-                    t=max(0,min(1,(abs(x)-core_extent)/max(1e-8,reach-core_extent)))
-                    weight=1-t*t*(3-2*t)
-                    points[i]=point-Vector(axis)*((slope*x+intercept)*weight/12)
-                p=np.array([tuple(points[i]) for i in ids],dtype=float)
-                if len(groups)==2:
-                    # Keep both paired attachment cross-sections circular;
-                    # a shear alone can squeeze their fixed endpoint samples.
-                    half=radius*active.ropes_rope.double_spacing
-                    orders=[list(range(a,b)) if (Vector(p[b-1]-p[a])).dot(lead)>0
-                            else list(reversed(range(a,b))) for a,b in groups]
-                    for end in (0,1):
-                        pairs=[tuple(order[depth if not end else -1-depth] for order in orders) for depth in range(4)]
-                        centers=[(p[ia]+p[ib])*.5 for ia,ib in pairs]
-                        for depth,(ia,ib) in enumerate(pairs[:3]):
-                            tangent=Vector(centers[depth+1]-centers[max(0,depth-1)])
-                            section_side=up.cross(tangent).normalized()
-                            offset=np.array(tuple(section_side))*half
-                            if (p[ia]-p[ib])@offset<0:offset=-offset
-                            p[ia]=centers[depth]+offset;p[ib]=centers[depth]-offset
-                p=relax(p,50,False)
-                for i,value in zip(ids,p):points[i]=Vector(value)
-            p=relax(p,200,False)
-            for i,value in zip(ids,p):points[i]=Vector(value)
-        if supported:
-            passive_core=[point for point,s in zip(below,bstations) if abs(s-pst)<1e-6]
-            offset=_geometry.junction_support_offset(surface,Vector(normal),
-                         [([points[i] for i in ids],radius),(passive_core,passive.ropes_rope.radius)],
-                         max(envelope_radius(active),envelope_radius(passive))*8*size)
-            for owner,station in ((active,ast),(passive,pst)):
-                body,ss=displays[owner.name]
-                extent=max(envelope_radius(active),envelope_radius(passive))*16*size
-                for i,s in enumerate(ss):
-                    blend=max(0,1-abs(s-station)/extent)
-                    body[i]+=offset*(blend*blend*(3-2*blend))
 
 
 def crossing_strand_segments(owner,points,stations,station,extent):
@@ -1167,12 +896,7 @@ def fit_crossing_curves(scene, surface, displays, paths):
         crossing,ut=sample_at(paths[upper.name],cumulative(paths[upper.name]),us)
         _,lt=sample_at(paths[lower.name],cumulative(paths[lower.name]),ls)
         normal=surface.normal_at(crossing)
-        sine=max(.1,ut.normalized().cross(lt.normalized()).length)
-        upper_half=upper.ropes_rope.radius*upper.ropes_rope.double_spacing if upper.ropes_rope.doubled else 0
-        lower_half=lower.ropes_rope.radius*lower.ropes_rope.double_spacing if lower.ropes_rope.doubled else 0
-        plateau=min(span*.6,(lower_half+upper_half*abs(ut.normalized().dot(lt.normalized())))/sine)
-        # Paired passive runs need a short level contact region, rather than
-        # an oversized peak suspended above the space between their curves.
+        plateau=0.0
         weights=[.5*(1+math.cos(math.pi*max(0,abs(s-us)-plateau)/(span-plateau)))
                  if abs(s-us)<span else 0 for s in stations]
         upper_segments=[i for i in range(len(points)-1) if weights[i]>0 or weights[i+1]>0]
@@ -1209,8 +933,6 @@ def render_ropes(scene, target, surface, ropes, paths):
     displays = {rope.name: display_path(scene, rope, surface, paths[rope.name])
                 for rope in ropes if rope.name in paths}
     fit_crossing_curves(scene,surface,displays,paths)
-    snug_junction_curves(scene,surface,displays)
-    separate_knot_leads(scene,target,surface,displays)
     for _ in range(2):
         seat_crossing_strands(scene,surface,displays,paths)
     pressure = PressureField(scene, target, surface, displays)
@@ -1257,6 +979,7 @@ def render_ropes(scene, target, surface, ropes, paths):
     for helper in list(scene.objects):
         if helper.get('ropes_helper') and helper.parent == target and helper not in used_helpers:
             delete_rope(helper)
+    curve_view_update(scene.ropes_settings,SimpleNamespace(scene=scene))
     deform(scene, target, pressure)
     refresh_markers(scene, target, surface, pressure)
     bpy.context.view_layer.update()
@@ -1625,7 +1348,7 @@ def restore_state(scene, target, state):
                 anchor.position,anchor.kind=point['position'],point['kind']
             for knot in record['knots']:
                 item = props.knots.add()
-                item.distance, item.kind = knot['distance'], knot['kind']
+                item.distance, item.kind = knot['distance'], 'OVERHAND'
             rope['ropes_path'] = record['path']
             rope['ropes_leg_bounds'] = record['legs']
             rope['ropes_span_flags']=record['spans']
@@ -1641,7 +1364,7 @@ def restore_state(scene, target, state):
             j.position = record['position']
             j.distance_a, j.distance_b = record['sa'], record['sb']
             j.is_knot, j.over_a, j.uid = record['knot'], record['over_a'], record['uid']
-            j.kind = record['kind']
+            j.kind = 'OVERHAND'
             j.knot_a,j.knot_owner_set=record.get('knot_a',j.over_a),record.get('knot_owner_set',False)
         settings.active_rope = next((r for r in rope_objects(scene,target) if r.ropes_rope.uid==state['active']),None)
     if state.get('drafts_only'):
@@ -1932,7 +1655,7 @@ def restore_draft_junctions(scene,rope,source):
             j.rope_a,j.rope_b=owners[record['a']],owners[record['b']]
             j.position=record['position']
             j.distance_a,j.distance_b=record['sa'],record['sb']
-            j.is_knot,j.over_a,j.uid,j.kind=record['knot'],record['over_a'],record['uid'],record['kind']
+            j.is_knot,j.over_a,j.uid,j.kind=record['knot'],record['over_a'],record['uid'],'OVERHAND'
             j.knot_a,j.knot_owner_set=record.get('knot_a',j.over_a),record.get('knot_owner_set',False)
 
 
@@ -2042,6 +1765,7 @@ class ROPES_PT_Panel(bpy.types.Panel):
         layout = self.layout
         settings = context.scene.ropes_settings
         layout.prop(settings, 'target', text='Surface')
+        layout.prop(settings, 'curve_view', text='Display')
         layout.operator('ropes.use_selected', icon='EYEDROPPER')
         layout.prop(settings, 'show_waypoints')
         layout.prop(settings, 'waypoint_size')
@@ -2067,15 +1791,9 @@ class ROPES_PT_Panel(bpy.types.Panel):
             box.prop(props, 'smoothing', slider=True)
             box.prop(props, 'subdivisions')
             box.prop(props, 'strand_pitch')
-            box.prop(props, 'doubled')
-            if props.doubled:
-                box.prop(props, 'double_spacing')
-            box.prop(props, 'knot_type')
             box.prop(props, 'knot_size')
             if props.knots:
                 box.template_list('ROPES_UL_Knots', '', props, 'knots', props, 'active_knot', rows=2)
-                if props.active_knot < len(props.knots):
-                    box.prop(props.knots[props.active_knot], 'kind')
             box.prop(props, 'squish', slider=True)
             box.prop(props, 'tension', slider=True)
             box.prop(props, 'falloff')
@@ -2087,10 +1805,6 @@ class ROPES_PT_Panel(bpy.types.Panel):
             layout.template_list('ROPES_UL_Junctions', '', settings, 'junctions',
                                  settings, 'active_junction', rows=3)
             layout.operator('ropes.swap_crossing', icon='SORT_ASC')
-            if settings.active_junction < len(settings.junctions):
-                junction = settings.junctions[settings.active_junction]
-                if junction.is_knot:
-                    layout.prop(junction, 'kind')
         layout.prop(settings, 'show_defaults', icon='TRIA_DOWN' if settings.show_defaults else 'TRIA_RIGHT')
         if settings.show_defaults:
             box = layout.box()

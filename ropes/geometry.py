@@ -418,154 +418,56 @@ def orient_knot_body(points,center,tangent,normal,radius):
     return [center+x*p.x+y*(p.y*cosine-p.z*sine)+z*(p.y*sine+p.z*cosine-floor+radius*1.05) for p in local]
 
 
-def knot_points(center, tangent, normal, radius, kind='TREFOIL'):
-    """Procedural overhand/figure-eight centerlines; references in KNOT_SOURCES.md."""
-    x = tangent.normalized()
-    z = normal.normalized()
-    y = z.cross(x).normalized()
-    if y.length < .1:
-        y = x.orthogonal().normalized()
-    z = x.cross(y).normalized()
-    if kind != 'TREFOIL':
-        result = []
-        count = 180 if kind == 'OVERHAND' else 220
-        # Open the outer arc to provide separate entering/exiting leads. The
-        # standard trefoil/figure-eight parameterizations are cited in KNOT_SOURCES.
-        for i in range(count):
-            t = math.radians(46.5+267*i/(count-1)) if kind=='OVERHAND' else math.pi/6+(5*math.pi/3)*i/(count-1)
-            if kind == 'OVERHAND':
-                a = (2+math.cos(3*t))*math.cos(2*t)
-                b = (2+math.cos(3*t))*math.sin(2*t)
-                height = 2.3+1.25*math.sin(3*t)
-                px, py = -b*.9, a*.85
-            else:
-                a = (2+math.cos(2*t))*math.cos(3*t)
-                b = (2+math.cos(2*t))*math.sin(3*t)
-                height = 2.45+1.35*math.sin(4*t)
-                px, py = -b*.9, a*.75
-            result.append(center+radius*(px*x+py*y+height*z))
-        return orient_knot_body(result,center,x,z,radius)
-    result = []
-    for i in range(128):
-        t = 2*math.pi*i/128
-        # Standard (2,3) torus knot, sitting above the surface.
-        result.append(center + radius*((2+math.cos(3*t))*math.cos(2*t)*x +
-                      (2+math.cos(3*t))*math.sin(2*t)*y + (1.6+math.sin(3*t))*z))
+def knot_points(center, tangent, normal, radius, kind='OVERHAND',count=180):
+    """The single overhand template shared by all three placement cases."""
+    x=tangent.normalized();y=normal.cross(x).normalized();z=x.cross(y).normalized()
+    result=[]
+    for i in range(count):
+        t=math.radians(46.5+267*i/(count-1))
+        a=(2+math.cos(3*t))*math.cos(2*t)
+        b=(2+math.cos(3*t))*math.sin(2*t)
+        result.append(center+radius*(-b*.9*x+a*.85*y+(2.3+1.25*math.sin(3*t))*z))
+    return orient_knot_body(result,center,x,z,radius)
+
+
+def overhand_eye(points,tangent,normal):
+    """Centre of the bounded eye between the template's projected crossings."""
+    x=tangent.normalized();depth=normal.cross(x).normalized();up=x.cross(depth).normalized()
+    stride=max(1,len(points)//180)
+    points=points[::stride]+([points[-1]] if (len(points)-1)%stride else [])
+    crossings=[]
+    for i,(a,b) in enumerate(zip(points,points[1:])):
+        u=b-a
+        for c,d in zip(points[i+2:],points[i+3:]):
+            v=d-c;w=c-a
+            determinant=u.dot(x)*v.dot(up)-u.dot(up)*v.dot(x)
+            if abs(determinant)<1e-12:continue
+            t=(w.dot(x)*v.dot(up)-w.dot(up)*v.dot(x))/determinant
+            q=(w.dot(x)*u.dot(up)-w.dot(up)*u.dot(x))/determinant
+            if 0<t<1 and 0<q<1:
+                point=a+u*t
+                point-=depth*(point.dot(depth)-(points[0]+points[-1]).dot(depth)*.5)
+                if not any((point-p).length<1e-6 for p in crossings):crossings.append(point)
+    if len(crossings)<2:
+        raise ValueError('Overhand template has no central eye in its attachment frame')
+    return sum(crossings,Vector())/len(crossings)
+
+
+def expand_overhand_eye(points,eye,axis,clearance):
+    """Smooth monotone radial opening; preserve the template's crossing order.
+
+    r -> sqrt(r*r + delta) opens the inner chamber without uniformly inflating
+    the hemispheres or introducing a local bend/collision projection.
+    """
+    axis=axis.normalized()
+    radial=[p-eye-axis*(p-eye).dot(axis) for p in points]
+    minimum=min(r.length for r in radial)
+    delta=max(0,clearance*clearance-minimum*minimum)
+    result=[]
+    for p,r in zip(points,radial):
+        if r.length<1e-10:raise ValueError('Passive axis passes through an overhand centreline')
+        result.append(p+r*(math.sqrt(r.length_squared+delta)/r.length-1))
     return result
-
-
-def doubled_path(surface, points, stations, radius, spacing=1, free=None, normals=None, surface_refs=None, junction_stations=()):
-    """One continuous folded rope: two runs, joined by a bight at the start."""
-    lanes = [[], []]
-    last_side = None
-    half = radius*spacing
-    physical_lengths=cumulative(points)
-    curve_mode=[surface_refs is not None and surface_refs[i] is not None and len(surface_refs[i])==3 for i in range(len(points))]
-    for i, point in enumerate(points):
-        nearest, normal, _ = surface.project(point)
-        normal = normals[i] if normals is not None else surface.normal_at(nearest)
-        tangent = (sample_at(points,physical_lengths,min(physical_lengths[-1],physical_lengths[i]+radius*.5))[0]
-                   -sample_at(points,physical_lengths,max(0,physical_lengths[i]-radius*.5))[0])
-        if tangent.length < 1e-8:
-            tangent = Vector((1, 0, 0))
-        tangent.normalize()
-        at_core=any(abs(stations[i]-s)<1e-8 for s in junction_stations)
-        if i+1<len(stations) and abs(stations[i+1]-stations[i])<1e-8:
-            tangent=points[min(i+1,len(points)-1)]-points[max(0,i-1)]
-            tangent.normalize()
-        core_start=(at_core and i+1<len(stations) and abs(stations[i+1]-stations[i])<1e-8
-                    and (i==0 or abs(stations[i]-stations[i-1])>1e-8))
-        core_end=(at_core and i>0 and abs(stations[i]-stations[i-1])<1e-8
-                  and (i==len(stations)-1 or abs(stations[i+1]-stations[i])>1e-8))
-        if core_start:
-            tangent=(points[i+1]-point).normalized()
-        elif core_end:
-            tangent=(point-points[i-1]).normalized()
-        if last_side is None or core_start:
-            side = normal.cross(tangent)
-            if side.length < 1e-5:
-                side = tangent.orthogonal()
-        else:
-            side = last_tangent.rotation_difference(tangent) @ last_side
-            side -= tangent*side.dot(tangent)
-        if last_side is not None and not at_core and (point-nearest).length < radius*1.6 and not (free and free[i]):
-            guide=normal.cross(tangent)
-            if guide.length>1e-5:
-                guide.normalize()
-                if guide.dot(side)<0:
-                    guide.negate()
-                side=side.lerp(guide,.2)
-        side.normalize()
-        last_side, last_tangent = side.copy(), tangent.copy()
-        # Bounded distance corrections do not divide by a nearly perpendicular
-        # surface normal. Both runs move together, preserving their separation.
-        center=point.copy()
-        for _ in range(0 if curve_mode[i] else 40):
-            corrections=[contact_correction(surface,center+side*(half*sign),radius,point)
-                         for sign in (-1,1)]
-            correction=sum(corrections,Vector())
-            if max(c.length for c in corrections)<radius*1e-5:
-                break
-            if correction.length>radius*.6:
-                correction=correction.normalized()*radius*.6
-            center+=correction
-        for lane, sign in zip(lanes, (-1, 1)):
-            lane.append(center+side*(half*sign))
-    if not any(curve_mode) and all(abs(a-b)>1e-8 for a,b in zip(stations,stations[1:])):
-        centers=[(a+b)/2 for a,b in zip(*lanes)]
-        offsets=[(b-a)/2 for a,b in zip(*lanes)]
-        for _ in range(24):
-            updated=[centers[0]]
-            for i in range(1,len(centers)-1):
-                center=centers[i].lerp((centers[i-1]+centers[i+1])/2,.45)
-                for _ in range(10):
-                    corrections=[contact_correction(surface,center+sign*offsets[i],radius,points[i]) for sign in (-1,1)]
-                    delta=sum(corrections,Vector())
-                    if max(c.length for c in corrections)<radius*1e-5:
-                        break
-                    if delta.length>radius*.6:
-                        delta=delta.normalized()*radius*.6
-                    center+=delta
-                updated.append(center)
-            centers=updated+[centers[-1]]
-        lanes=[[c-sign*o for c,o in zip(centers,offsets)] for sign in (1,-1)]
-    if surface_refs is not None:
-        previous_side=None
-        for i,reference in enumerate(surface_refs):
-            if reference is None:
-                previous_side=None
-                continue
-            point,tangent=reference[:2]
-            if point is None:
-                continue
-            normal=surface.normal_at(point)
-            if len(reference)==3 and isinstance(reference[2],Vector) and reference[2].length>1e-8:
-                normal=reference[2].normalized()
-            side=normal.cross(tangent)
-            if side.length<1e-8:
-                side=(lanes[1][i]-lanes[0][i]).normalized()
-            side.normalize()
-            guide=previous_side if previous_side is not None else lanes[1][i]-lanes[0][i]
-            if side.dot(guide)<0:
-                side.negate()
-            previous_side=side.copy()
-            for lane,sign in zip(lanes,(-1,1)):
-                if len(reference)==3:
-                    co=surface.project(point)[0]
-                    lane[i]=co+(reference[2] if isinstance(reference[2],Vector) else normal*reference[2])+side*(half*sign)
-                else:
-                    lane[i]=surface.contact(point+side*(half*sign),radius)
-    center = (lanes[0][0]+lanes[1][0])/2
-    side = (lanes[0][0]-lanes[1][0])/2
-    tangent = points[1]-points[0]
-    if tangent.length < 1e-8:
-        tangent = Vector((1, 0, 0))
-    tangent.normalize()
-    bight = [center+side*math.cos(math.pi*i/24)-tangent*half*math.sin(math.pi*i/24)
-             for i in range(1, 24)]
-    result = list(reversed(lanes[0]))+bight+lanes[1]
-    mapping = list(reversed(stations))+[stations[0]]*len(bight)+list(stations)
-    return result, mapping
 
 
 def bezier_join(a, a_tangent, b, b_tangent, count=16):
@@ -664,62 +566,17 @@ def spanning_route(surface, start, end, radius):
     return resample(result,max(radius*.5,cumulative(result)[-1]/600))
 
 
-def junction_points(center, frame, lead, normal, ra, rb, component, kind, size=1, bundle=1, active_radius=None, passive_radius=None, passive_half=0):
-    """An active overhand around a straight passive rope through its eye.
-
-    frame is the passive axis, ra/rb are the active/passive bundle envelopes.
-    component 0 returns the tying rope, component 1 the straight support.
-    """
+def junction_points(center,frame,lead,normal,ra,rb,component,kind='OVERHAND',size=1):
+    """The line-knot template, with the passive rope through its expanded eye."""
+    body=align_knot_entries(knot_points(Vector(),lead,normal,ra*size,count=720),lead,count=72)
+    eye=overhand_eye(body,lead,normal)
     axis=frame.normalized()
-    z=(normal-axis*normal.dot(axis)).normalized()
-    x=axis.cross(z).normalized()
-    if x.dot(lead)<0:
-        x.negate()
-    # The eye clears the passive rope, while depth separates the active
-    # over/under passes. Both ends of the open knot attach along x.
-    minor=ra*.7*size
-    major=rb+ra*1.15+minor
-    depth=ra*1.6*size
-    local=[]
-    for i in range(220):
-        t=math.pi/6+(5*math.pi/3)*i/219
-        if kind=='FIGURE_EIGHT':
-            radial=major+minor*math.cos(2*t)
-            a,b=radial*math.cos(3*t),radial*math.sin(3*t)
-            d=depth*math.sin(4*t)
-        else:
-            # Fit the passive cross-section, reserving extra radial room only
-            # where the active rope crosses itself. A uniform torus left a
-            # large empty eye above the passive rope.
-            fit=(passive_radius or rb)+(active_radius or ra)*1.05*size
-            ux,uz=abs(math.sin(2*t)),abs(math.cos(2*t))
-            if passive_half and fit*ux<=passive_half*uz:
-                radial=fit/max(uz,1e-8)
-            else:
-                radial=passive_half*ux+math.sqrt(max(0,fit*fit-passive_half*passive_half*uz*uz))
-            radial+=ra*2.1*size*max(0,math.cos(3*t))**2
-            a,b=radial*math.cos(2*t),radial*math.sin(2*t)
-            d=depth*math.sin(3*t)
-        local.append(Vector((a,b,d)))
-    chord=local[-1]-local[0]
-    chord=Vector((chord.x,chord.y,0)).normalized()
-    perpendicular=Vector((-chord.y,chord.x,0))
-    height=-min(p.dot(perpendicular) for p in local)+ra*1.08
-    origin=center+z*height
+    body=expand_overhand_eye(body,eye,axis,(ra+rb)*1.01)
+    body=[center+p-eye for p in body]
     if component:
-        reach=depth+ra*1.2
-        return [origin+axis*reach*(2*i/30-1) for i in range(31)]
-    if kind=='OVERHAND':
-        # Put the existing opening on the lower side of the passive axis.
-        # A half-turn and reversed traversal retain the same knot and eye,
-        # but bring the two attachments down instead of arching over the body.
-        core=[origin-x*p.dot(chord)-z*p.dot(perpendicular)+axis*p.z for p in reversed(local)]
-        # Give the entry guards enough horizontal room to turn into the body;
-        # aligning a tangent at an unmoved port otherwise creates a tight elbow.
-        core[0]-=x*ra*1.75
-        core[-1]+=x*ra*1.75
-        return align_knot_entries(core,lead,count=12)
-    return [origin+x*p.dot(chord)+z*p.dot(perpendicular)+axis*p.z for p in local]
+        reach=max(abs((p-center).dot(axis)) for p in body)+ra*3
+        return [center+axis*(reach*(2*i/30-1)) for i in range(31)]
+    return body
 
 
 def junction_support_offset(surface,normal,cores,max_shift):

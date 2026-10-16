@@ -1,3 +1,20 @@
+## 0.12.0
+
+- Remove doubled-rope controls and construction, plus figure-eight and legacy
+  knot styles. Migrate saved ropes to single overhands, retaining their anchors,
+  widths, identities and knot stations.
+- Retain the accepted line overhand and reuse its parametrization at both kinds
+  of junction. Open its eye with a smooth monotone radial transformation around
+  the passive axis; the passive core stays straight.
+- Delete the previous independent junction formula, collision relaxation and
+  attachment shear. Seat both components with a common translation and join
+  their ports with long tangent-continuous cubic leads.
+- Add Rope / Centre Curves / Rope + Curves views. The actual generated centreline
+  is inspectable Bezier data with vector handles, avoiding hidden smoothing.
+- Preserve ordinary strand-contact junctions, routing, spans, drafting and
+  surface deformation. Replace removed-feature tests with shared-template,
+  smooth eye opening, self/other junction, curve-view and migration coverage.
+
 ## 0.11.1
 
 - Close residual crossing gaps against the three actual fibre centrelines and

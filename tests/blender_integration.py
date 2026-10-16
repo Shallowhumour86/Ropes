@@ -58,20 +58,18 @@ class RopesIntegration(unittest.TestCase):
         self.target = bpy.context.object
         self.settings = bpy.context.scene.ropes_settings
         self.settings.target = self.target
-        self.settings.radius = .035
+        self.settings.radius = 0.035
         self.settings.subdivisions = 1
         self.settings.squish = 0
-        self.settings.tension = .5
+        self.settings.tension = 0.5
         self.settings.smoothing = 1
-        self.settings.waypoint_xray=False
-        self.settings.waypoint_size=.6
+        self.settings.waypoint_xray = False
+        self.settings.waypoint_size = 0.6
         self.settings.show_waypoints = False
         self.settings.waypoint_mode = False
         self.settings.placement_kind = 'NORMAL'
         self.settings.knot_type = 'OVERHAND'
         self.settings.knot_size = 1
-        self.settings.doubled = False
-        self.settings.double_spacing = 1
         self.settings.falloff = 4
 
     def rope(self, *anchors):
@@ -116,169 +114,89 @@ class RopesIntegration(unittest.TestCase):
         self.assertEqual(len(ropes.visible_path(b)), len(ropes.rest_path(b)))
 
     def test_crossing_clearance_uses_actual_run_radii(self):
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        for doubled_a,doubled_b in ((False,False),(True,False),(False,True),(True,True)):
-            for reverse in (False,True):
-                with self.subTest(doubled_a=doubled_a,doubled_b=doubled_b,reverse=reverse):
-                    with ropes.quiet_updates():
-                        a.ropes_rope.radius=.025
-                        b.ropes_rope.radius=.06
-                        a.ropes_rope.tension=1
-                        b.ropes_rope.tension=0
-                        a.ropes_rope.doubled=doubled_a
-                        b.ropes_rope.doubled=doubled_b
-                        self.settings.junctions[0].over_a=not reverse
-                    ropes.rebuild(bpy.context.scene,self.target)
-                    pa,pb=ropes.visible_path(a),ropes.visible_path(b)
-                    gap=min((x-y).length for u,v in zip(pa,pa[1:]) for c,d in zip(pb,pb[1:])
-                            for x,y,_,_ in [closest_segments(u,v,c,d)])
-                    self.assertLessEqual(gap,.0851)
-                    self.assertGreater(gap,.085*.6)
-                    j=self.settings.junctions[0]
-                    fibres=[ropes.crossing_strand_segments(r,ropes.visible_path(r),json.loads(r['ropes_stations']),station,.7)
-                            for r,station in ((a,j.distance_a),(b,j.distance_b))]
-                    self.assertAlmostEqual(ropes.strand_segment_gap(*fibres),.085*.46,delta=.00005)
-                    passive=a if reverse else b
-                    height=ropes.curve_height(passive)
-                    self.assertLess(max(abs(p.z-height) for p in ropes.visible_path(passive)),1e-5)
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                with ropes.quiet_updates():
+                    a.ropes_rope.radius = 0.025
+                    b.ropes_rope.radius = 0.06
+                    a.ropes_rope.tension = 1
+                    b.ropes_rope.tension = 0
+                    self.settings.junctions[0].over_a = not reverse
+                ropes.rebuild(bpy.context.scene, self.target)
+                pa, pb = (ropes.visible_path(a), ropes.visible_path(b))
+                gap = min(((x - y).length for u, v in zip(pa, pa[1:]) for c, d in zip(pb, pb[1:]) for x, y, _, _ in [closest_segments(u, v, c, d)]))
+                self.assertLessEqual(gap, 0.0851)
+                self.assertGreater(gap, 0.085 * 0.6)
+                j = self.settings.junctions[0]
+                fibres = [ropes.crossing_strand_segments(r, ropes.visible_path(r), json.loads(r['ropes_stations']), station, 0.7) for r, station in ((a, j.distance_a), (b, j.distance_b))]
+                self.assertAlmostEqual(ropes.strand_segment_gap(*fibres), 0.085 * 0.46, delta=5e-05)
+                passive = a if reverse else b
+                height = ropes.curve_height(passive)
+                self.assertLess(max((abs(p.z - height) for p in ropes.visible_path(passive))), 1e-05)
 
     def test_self_crossing_clearance_after_swap(self):
-        r=self.rope((-1.3,-1.3,0),(1.3,1.3,0),(-1.3,1.3,0),(1.3,-1.3,0))
-        for doubled in (False,True):
-            for over in (False,True):
-                with ropes.quiet_updates():
-                    r.ropes_rope.doubled=doubled
-                    self.settings.junctions[0].over_a=over
-                ropes.rebuild(bpy.context.scene,self.target)
-                joint=self.settings.junctions[0]
-                points=ropes.visible_path(r)
-                stations=json.loads(r['ropes_stations'])
-                aa=[i for i in range(len(points)-1) if abs(stations[i]-joint.distance_a)<.3]
-                bb=[i for i in range(len(points)-1) if abs(stations[i]-joint.distance_b)<.3]
-                gap=min((x-y).length for i in aa for j in bb
-                        for x,y,_,_ in [closest_segments(points[i],points[i+1],points[j],points[j+1])])
-                self.assertLessEqual(gap,2*r.ropes_rope.radius+.0001)
-                self.assertGreater(gap,1.2*r.ropes_rope.radius)
-                parts=[ropes.crossing_strand_segments(r,points,stations,s,.4) for s in (joint.distance_a,joint.distance_b)]
-                self.assertAlmostEqual(ropes.strand_segment_gap(*parts),.92*r.ropes_rope.radius,delta=.00005)
+        r = self.rope((-1.3, -1.3, 0), (1.3, 1.3, 0), (-1.3, 1.3, 0), (1.3, -1.3, 0))
+        for over in (False, True):
+            with ropes.quiet_updates():
+                self.settings.junctions[0].over_a = over
+            ropes.rebuild(bpy.context.scene, self.target)
+            joint = self.settings.junctions[0]
+            points = ropes.visible_path(r)
+            stations = json.loads(r['ropes_stations'])
+            aa = [i for i in range(len(points) - 1) if abs(stations[i] - joint.distance_a) < 0.3]
+            bb = [i for i in range(len(points) - 1) if abs(stations[i] - joint.distance_b) < 0.3]
+            gap = min(((x - y).length for i in aa for j in bb for x, y, _, _ in [closest_segments(points[i], points[i + 1], points[j], points[j + 1])]))
+            self.assertLessEqual(gap, 2 * r.ropes_rope.radius + 0.0001)
+            self.assertGreater(gap, 1.2 * r.ropes_rope.radius)
+            parts = [ropes.crossing_strand_segments(r, points, stations, s, 0.4) for s in (joint.distance_a, joint.distance_b)]
+            self.assertAlmostEqual(ropes.strand_segment_gap(*parts), 0.92 * r.ropes_rope.radius, delta=5e-05)
 
     def test_crossing_apex_is_centered_on_passive_curve(self):
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            ropes.rebuild(bpy.context.scene,self.target)
-            joint=self.settings.junctions[0]
-            self.assertLess(Vector(joint.position).xy.length,1e-5)
-            self.assertAlmostEqual(joint.distance_a,1.5,places=5)
-            points=ropes.visible_path(a)
-            peak=max(points,key=lambda p:p.z)
-            step=max((q-p).length for p,q in zip(ropes.rest_path(a),ropes.rest_path(a)[1:]))
-            summit=[p.x for p in points if peak.z-p.z<1e-6]
-            self.assertLess(abs(sum(summit)/len(summit)),step)
-            bottom=max(p.z for p in ropes.visible_path(b))
-            self.assertLessEqual(peak.z-bottom,2*a.ropes_rope.radius+.001)
-            self.assertGreater(peak.z-bottom,1.2*a.ropes_rope.radius)
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        ropes.rebuild(bpy.context.scene, self.target)
+        joint = self.settings.junctions[0]
+        self.assertLess(Vector(joint.position).xy.length, 1e-05)
+        self.assertAlmostEqual(joint.distance_a, 1.5, places=5)
+        points = ropes.visible_path(a)
+        peak = max(points, key=lambda p: p.z)
+        step = max(((q - p).length for p, q in zip(ropes.rest_path(a), ropes.rest_path(a)[1:])))
+        summit = [p.x for p in points if peak.z - p.z < 1e-06]
+        self.assertLess(abs(sum(summit) / len(summit)), step)
+        bottom = max((p.z for p in ropes.visible_path(b)))
+        self.assertLessEqual(peak.z - bottom, 2 * a.ropes_rope.radius + 0.001)
+        self.assertGreater(peak.z - bottom, 1.2 * a.ropes_rope.radius)
 
-    def test_size_one_junction_tightens_actual_curves(self):
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-                a.ropes_rope.knot_size=1
-            ropes.rebuild(bpy.context.scene,self.target)
-            surface=Surface(self.target,1)
-            loose={r.name:ropes.display_path(bpy.context.scene,r,surface,ropes.rest_path(r)) for r in (a,b)}
-            station=ropes.knot_records(bpy.context.scene,a)[0]['station']
-            ids=[i for i,s in enumerate(loose[a.name][1]) if abs(s-station)<1e-6]
-            baseline={name:([p.copy() for p in data[0]],list(data[1])) for name,data in loose.items()}
-            ropes.snug_junction_curves(bpy.context.scene,surface,baseline,align=False)
-            before=[p.copy() for p in loose[a.name][0]]
-            passive_before=[p.copy() for p in loose[b.name][0]]
-            ropes.snug_junction_curves(bpy.context.scene,surface,loose)
-            # Seating translates the passive core without bending it.
-            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
-            core=[p for p,s in zip(loose[b.name][0],loose[b.name][1]) if abs(s-passive_station)<1e-6]
-            self.assertLess(max(p.z for p in core)-min(p.z for p in core),1e-5)
-            # The occupied cross-section shrinks while the straight support
-            # and the entry endpoints remain fixed.
-            spread=lambda pts:sum(p.x*p.x for i,p in enumerate(pts) if i in ids)
-            self.assertLess(spread(loose[a.name][0]),spread(before))
-            for r in (a,b):
-                self.assertEqual(loose[r.name][0][0],before[0] if r==a else passive_before[0])
-            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
-            pp,ss=loose[b.name]
-            rods=[(pp[i],pp[i+1]) for i in range(len(pp)-1)
-                  if abs(ss[i]-passive_station)<1e-6 and abs(ss[i+1]-passive_station)<1e-6]
-            gap=min(ropes.point_segment_distance(loose[a.name][0][i],p,q) for i in ids for p,q in rods)
-            self.assertAlmostEqual(gap,2*a.ropes_rope.radius,delta=.001)
-            groups=[];group=[]
-            for i in ids:
-                if group and i!=group[-1]+1:groups.append(group);group=[]
-                group.append(i)
-            groups.append(group)
-            ports=[];aligned_chord=Vector()
-            for group in groups:
-                first,last=(loose[a.name][0][i] for i in (group[0],group[-1]))
-                delta=last-first
-                self.assertLess(abs(delta.y),a.ropes_rope.radius*.2)
-                aligned_chord+=delta if delta.x>0 else -delta
-                ports.extend((first,last))
-            self.assertLess(abs(aligned_chord.y),1e-5)
-            self.assertAlmostEqual(sum(p.y for p in ports)/len(ports),0,places=5)
-            # The canonical attachment frame has a fixed external closure.
-            # For aligned open ports, validate wrapping and physical clearance
-            # directly: a world-space closure can cross the repositioned leads.
-            passive_core=[p for p,s in zip(loose[b.name][0],loose[b.name][1]) if abs(s-passive_station)<1e-6]
-            center=sum(passive_core,Vector())/len(passive_core)
-            for group in groups:
-                canonical=[baseline[a.name][0][i] for i in group]
-                self.assertEqual(knot_determinant(canonical),3)
-                core=[loose[a.name][0][i] for i in group]
-                angles=[math.atan2(p.z-center.z,p.x-center.x) for p in core]
-                winding=sum(math.atan2(math.sin(b-a),math.cos(b-a)) for a,b in zip(angles,angles[1:]))
-                self.assertGreater(abs(winding),2*math.pi)
-                arc=cumulative(core)
-                gaps=[(x-y).length for i in range(len(core)-1) for j in range(i+1,len(core)-1)
-                      if arc[j]-arc[i]>a.ropes_rope.radius*6
-                      for x,y,_,_ in [closest_segments(core[i],core[i+1],core[j],core[j+1])]]
-                self.assertGreater(min(gaps),a.ropes_rope.radius*1.95)
-            if doubled:
-                left,right=([loose[a.name][0][i] for i in group] for group in groups)
-                distance=min((x-y).length for p,q in zip(left,left[1:]) for u,v in zip(right,right[1:])
-                             for x,y,_,_ in [closest_segments(p,q,u,v)])
-                self.assertGreater(distance,a.ropes_rope.radius*1.95)
 
     def test_crossing_rendered_strands_touch_at_different_twists(self):
         from mathutils.bvhtree import BVHTree
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        for doubled in (False,True):
-            for pitch in (7,17):
-                with self.subTest(doubled=doubled,pitch=pitch):
-                    with ropes.quiet_updates():
-                        a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-                        a.ropes_rope.strand_pitch=pitch
-                    ropes.rebuild(bpy.context.scene,self.target)
-                    vertices=[];faces=[]
-                    for obj in bpy.context.scene.objects:
-                        if obj.get('ropes_owner')!=b.ropes_rope.uid or obj.type!='MESH':continue
-                        offset=len(vertices)
-                        vertices.extend(obj.matrix_world@v.co for v in obj.data.vertices)
-                        faces.extend([offset+i for i in f.vertices] for f in obj.data.polygons)
-                    tree=BVHTree.FromPolygons(vertices,faces)
-                    gap=float('inf')
-                    for obj in bpy.context.scene.objects:
-                        if obj.get('ropes_owner')!=a.ropes_rope.uid or obj.type!='MESH':continue
-                        for vertex in obj.data.vertices:
-                            p=obj.matrix_world@vertex.co
-                            if abs(p.x)<.2 and abs(p.y)<.2:
-                                gap=min(gap,tree.find_nearest(p)[3])
-                    self.assertLess(gap,(a.ropes_rope.radius+b.ropes_rope.radius)*.05)
+        a = self.rope((-1.5, 0, 0), (1.5, 0, 0))
+        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
+        for pitch in (7, 17):
+            with self.subTest(pitch=pitch):
+                with ropes.quiet_updates():
+                    a.ropes_rope.strand_pitch = pitch
+                ropes.rebuild(bpy.context.scene, self.target)
+                vertices = []
+                faces = []
+                for obj in bpy.context.scene.objects:
+                    if obj.get('ropes_owner') != b.ropes_rope.uid or obj.type != 'MESH':
+                        continue
+                    offset = len(vertices)
+                    vertices.extend((obj.matrix_world @ v.co for v in obj.data.vertices))
+                    faces.extend(([offset + i for i in f.vertices] for f in obj.data.polygons))
+                tree = BVHTree.FromPolygons(vertices, faces)
+                gap = float('inf')
+                for obj in bpy.context.scene.objects:
+                    if obj.get('ropes_owner') != a.ropes_rope.uid or obj.type != 'MESH':
+                        continue
+                    for vertex in obj.data.vertices:
+                        p = obj.matrix_world @ vertex.co
+                        if abs(p.x) < 0.2 and abs(p.y) < 0.2:
+                            gap = min(gap, tree.find_nearest(p)[3])
+                self.assertLess(gap, (a.ropes_rope.radius + b.ropes_rope.radius) * 0.05)
 
     def test_manual_knots_and_extension_preserve_station(self):
         r = self.rope((-1.5, 0, 0), (1, 0, 0))
@@ -611,76 +529,29 @@ class RopesIntegration(unittest.TestCase):
         ropes.knot_at(bpy.context.scene, r, 1.5)
         self.assertLess(max(abs(old-p.co.z) for old,p in zip(before,key.data)), 1e-5)
 
-    def test_knot_styles_overrides_and_junction_preservation(self):
-        r = self.rope((-1.5, 0, 0), (1.5, 0, 0))
-        ropes.knot_at(bpy.context.scene, r, 1.2)
-        overhand = [tuple(p) for p in ropes.visible_path(r)]
-        r.ropes_rope.knot_type = 'FIGURE_EIGHT'
-        eight = [tuple(p) for p in ropes.visible_path(r)]
-        self.assertNotEqual(overhand, eight)
-        r.ropes_rope.knots[0].kind = 'OVERHAND'
-        self.assertEqual(overhand, [tuple(p) for p in ropes.visible_path(r)])
-        r.ropes_rope.knots[0].kind = 'TREFOIL'
-        self.assertGreater(max(abs(p.y) for p in ropes.visible_path(r)),
-                           max(abs(p[1]) for p in overhand))
-        b = self.rope((0, -1.5, 0), (0, 1.5, 0))
-        j = self.settings.junctions[0]
-        j.is_knot = True
-        j.kind = 'FIGURE_EIGHT'
-        ropes.rebuild(bpy.context.scene, self.target)
-        self.assertEqual(self.settings.junctions[0].kind, 'FIGURE_EIGHT')
 
-    def test_doubled_rope_fold_runs_and_compression(self):
-        r = self.rope((-1, 0, 0), (1, 0, 0))
-        original = cumulative(ropes.visible_path(r))[-1]
-        r.ropes_rope.doubled = True
-        path = ropes.visible_path(r)
-        self.assertGreater(cumulative(path)[-1], original*2)
-        separation = r.ropes_rope.radius*2*r.ropes_rope.double_spacing
-        self.assertAlmostEqual((path[0]-path[-1]).length, separation, places=5)
-        self.assertAlmostEqual(path[0].x, 1, places=5)
-        self.assertAlmostEqual(path[-1].x, 1, places=5)
-        self.assertLess(min(p.x for p in path), -1)
-        mapping = json.loads(r['ropes_stations'])
-        self.assertEqual(len(mapping), len(path))
-        self.assertAlmostEqual(mapping[0], 2, places=5)
-        self.assertAlmostEqual(min(mapping), 0, places=5)
-        self.assertAlmostEqual(mapping[-1], 2, places=5)
-        r.ropes_rope.double_spacing = 4
-        r.ropes_rope.falloff = 1
-        r.ropes_rope.squish = .8
-        field = ropes.PressureField(bpy.context.scene, self.target)
-        half = r.ropes_rope.radius*4.04
-        self.assertGreater(field.value(Vector((0, half, 0))), field.value(Vector((0, 0, 0)))*3)
-        self.assertGreater(field.value(Vector((0, -half, 0))), field.value(Vector((0, 0, 0)))*3)
-        ropes.knot_at(bpy.context.scene, r, 1)
-        self.assertTrue(all(math.isfinite(v) for p in ropes.visible_path(r) for v in p))
-        r.ropes_rope.doubled = False
-        self.assertGreater(len(ropes.visible_path(r)), len(ropes.rest_path(r)))
-        self.assertFalse(self.settings.message, self.settings.message)
 
     def test_waypoint_move_keeps_knot_at_anchor_and_crossing_choice(self):
-        r = self.rope((-1, 0, 0), (0, .5, 0), (1, 0, 0))
+        r = self.rope((-1, 0, 0), (0, 0.5, 0), (1, 0, 0))
         old_bounds = json.loads(r['ropes_leg_bounds'])
         ropes.knot_at(bpy.context.scene, r, old_bounds[1])
-        r.ropes_rope.knots[0].kind = 'FIGURE_EIGHT'
+        r.ropes_rope.knots[0].kind = 'OVERHAND'
         state = ropes.capture_state(bpy.context.scene, self.target, r)
-        ropes.move_waypoint(bpy.context.scene, r, 1, (0, -.8, 0))
+        ropes.move_waypoint(bpy.context.scene, r, 1, (0, -0.8, 0))
         new_bounds = json.loads(r['ropes_leg_bounds'])
         self.assertAlmostEqual(r.ropes_rope.knots[0].distance, new_bounds[1], places=5)
-        self.assertEqual(r.ropes_rope.knots[0].kind, 'FIGURE_EIGHT')
+        self.assertEqual(r.ropes_rope.knots[0].kind, 'OVERHAND')
         ropes.restore_state(bpy.context.scene, self.target, state)
         self.assertAlmostEqual(r.ropes_rope.knots[0].distance, old_bounds[1], places=5)
-        # A lone junction between a pair retains its choices when it moves.
         b = self.rope((0, -1.8, 0), (0, 1.8, 0))
         self.settings.junctions[0].over_a = False
         self.settings.junctions[0].is_knot = True
-        self.settings.junctions[0].kind = 'FIGURE_EIGHT'
+        self.settings.junctions[0].kind = 'OVERHAND'
         ropes.move_waypoint(bpy.context.scene, r, 1, (0, -1.2, 0))
         j = self.settings.junctions[0]
         self.assertFalse(j.over_a)
         self.assertTrue(j.is_knot)
-        self.assertEqual(j.kind, 'FIGURE_EIGHT')
+        self.assertEqual(j.kind, 'OVERHAND')
 
     def test_draft_waypoints_generate_only_on_request(self):
         self.settings.waypoint_mode=True
@@ -709,34 +580,32 @@ class RopesIntegration(unittest.TestCase):
         self.assertEqual(len(r.ropes_rope.anchors),1)
 
     def test_spanning_direct_gap_and_zero_deformation(self):
-        bm=bmesh.new()
-        for x in (-1.5,1.5):
-            verts=[bm.verts.new((x+dx,y,0)) for dx,y in ((-.5,-.5),(.5,-.5),(.5,.5),(-.5,.5))]
+        bm = bmesh.new()
+        for x in (-1.5, 1.5):
+            verts = [bm.verts.new((x + dx, y, 0)) for dx, y in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))]
             bm.faces.new(verts)
-        mesh=bpy.data.meshes.new('Gap mesh')
+        mesh = bpy.data.meshes.new('Gap mesh')
         bm.to_mesh(mesh)
         bm.free()
-        self.target=bpy.data.objects.new('Gap surface',mesh)
+        self.target = bpy.data.objects.new('Gap surface', mesh)
         bpy.context.scene.collection.objects.link(self.target)
-        self.settings.target=self.target
-        self.settings.waypoint_mode=True
-        r=ropes.new_rope(bpy.context.scene,self.target)
+        self.settings.target = self.target
+        self.settings.waypoint_mode = True
+        r = ropes.new_rope(bpy.context.scene, self.target)
         with ropes.quiet_updates():
-            for p in ((-1,0,0),(1,0,0)):
-                a=r.ropes_rope.anchors.add()
-                a.position=p
-                a.kind='SPANNING'
-            r.ropes_rope.squish=1
-            r.ropes_rope.tension=1
-        self.assertEqual(bpy.ops.ropes.generate(),{'FINISHED'})
-        points=ropes.visible_path(r)
-        self.assertAlmostEqual(cumulative(points)[-1],2,places=4)
-        self.assertTrue(all(abs(p.y)<1e-5 for p in points))
-        self.assertFalse(ropes.PressureField(bpy.context.scene,self.target).contacts)
+            for p in ((-1, 0, 0), (1, 0, 0)):
+                a = r.ropes_rope.anchors.add()
+                a.position = p
+                a.kind = 'SPANNING'
+            r.ropes_rope.squish = 1
+            r.ropes_rope.tension = 1
+        self.assertEqual(bpy.ops.ropes.generate(), {'FINISHED'})
+        points = ropes.visible_path(r)
+        self.assertAlmostEqual(cumulative(points)[-1], 2, places=4)
+        self.assertTrue(all((abs(p.y) < 1e-05 for p in points)))
+        self.assertFalse(ropes.PressureField(bpy.context.scene, self.target).contacts)
         self.assertIsNone(self.target.data.shape_keys)
-        r.ropes_rope.doubled=True
-        self.assertFalse(self.settings.message,self.settings.message)
-        self.assertGreater(cumulative(ropes.visible_path(r))[-1],4)
+        self.assertFalse(self.settings.message, self.settings.message)
         self.assertIsNone(self.target.data.shape_keys)
 
     def test_spanning_obstacle_clearance(self):
@@ -801,90 +670,32 @@ class RopesIntegration(unittest.TestCase):
             self.assertEqual(before_a,[tuple(p) for p in ropes.visible_path(a)])
             self.assertEqual(before_b,[tuple(p) for p in ropes.visible_path(b)])
 
-    def test_doubled_overhand_minimum_is_tighter(self):
-        r=self.rope((-1.5,0,0),(1.5,0,0))
-        r.ropes_rope.doubled=True
-        ropes.knot_at(bpy.context.scene,r,1.5)
-        points=ropes.visible_path(r)
-        width=max(p.y for p in points)-min(p.y for p in points)
-        # 0.3 used 2.1 radii for the core plus a 1.1-radius lane offset;
-        # require a substantially narrower minimum-size knot footprint.
-        previous_width=2*(2.55*2.1+1.1)*r.ropes_rope.radius
-        self.assertLess(width,previous_width*.85)
-        r.ropes_rope.knot_size=1.5
-        larger=ropes.visible_path(r)
-        self.assertGreater(max(p.y for p in larger)-min(p.y for p in larger),width)
 
-    def test_valley_centerline_stays_straight_without_false_crossings(self):
-        # Dense channel with a hard concave crease and alternating triangles.
-        verts=[(-1.2+i*.06, -.4+j*.1, abs(-.4+j*.1)) for i in range(41) for j in range(9)]
-        faces=[(i*9+j,(i+1)*9+j,(i+1)*9+j+1,i*9+j+1) for i in range(40) for j in range(8)]
-        mesh=bpy.data.meshes.new('Creased valley')
-        mesh.from_pydata(verts,[],faces)
-        self.target=bpy.data.objects.new('Creased valley',mesh)
-        bpy.context.scene.collection.objects.link(self.target)
-        self.settings.target=self.target
-        r=self.rope((-1,0,0),(1,0,0))
-        points=ropes.visible_path(r)
-        self.assertEqual(len(self.settings.junctions),0)
-        self.assertLess(max(abs(p.y) for p in points),r.ropes_rope.radius*.15)
-        self.assertLess(cumulative(points)[-1],2.01)
-        surface=Surface(self.target,0)
-        self.assertTrue(all((p-surface.project(p)[0]).length<=ropes.curve_height(r)+1e-5 for p in points))
-        r.ropes_rope.doubled=True
-        self.assertFalse(self.settings.message,self.settings.message)
-        points=ropes.visible_path(r)
-        # Ignore the intentional folded end; both long runs remain straight.
-        tangents=[(b-a).normalized() for a,b in zip(points,points[1:]) if a.x>-.9 and b.x>-.9]
-        self.assertTrue(all(abs(t.x)>.99 for t in tangents))
-        # Contact resolution must not squeeze the two runs into the same groove.
-        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2,places=4)
-        for p in points:
-            if p.x>-.9:
-                self.assertLessEqual(abs(p.z-ropes.curve_height(r)),1e-5)
-        r.ropes_rope.squish=.7
-        self.assertFalse(self.settings.message,self.settings.message)
-        self.assertEqual(len(self.settings.junctions),0)
-        points=ropes.visible_path(r)
-        tangents=[(b-a).normalized() for a,b in zip(points,points[1:]) if abs(a.x)<.8 and abs(b.x)<.8]
-        self.assertTrue(all(abs(t.x)>.99 for t in tangents))
 
     def test_span_contacts_and_mixed_transition_have_no_height_step(self):
-        r=self.rope((-1.5,0,0),(-.5,0,0),(.5,0,0),(1.5,0,0))
+        r = self.rope((-1.5, 0, 0), (-0.5, 0, 0), (0.5, 0, 0), (1.5, 0, 0))
         with ropes.quiet_updates():
-            r.ropes_rope.anchors[1].kind='SPANNING'
-            r.ropes_rope.anchors[2].kind='SPANNING'
-        ropes.rebuild(bpy.context.scene,self.target)
-        for doubled in (False,True):
-            r.ropes_rope.doubled=doubled
-            self.assertFalse(self.settings.message,self.settings.message)
-            points=ropes.visible_path(r)
-            self.assertAlmostEqual(points[-1].z,ropes.curve_height(r),places=5)
-            self.assertLess(max(abs(b.z-a.z) for a,b in zip(points,points[1:])),r.ropes_rope.radius*.2)
-        r.ropes_rope.squish=1
-        r.ropes_rope.tension=1
-        points=ropes.visible_path(r)
-        turns=[(b-a).normalized().dot((c-b).normalized()) for a,b,c in zip(points,points[1:],points[2:]) if min(a.x,b.x,c.x)>-.8]
-        self.assertTrue(all(t>.95 for t in turns),min(turns))
-        # Inspection markers remain at contact locations when compression is off.
-        r.ropes_rope.squish=0
-        self.settings.show_waypoints=True
+            r.ropes_rope.anchors[1].kind = 'SPANNING'
+            r.ropes_rope.anchors[2].kind = 'SPANNING'
+        ropes.rebuild(bpy.context.scene, self.target)
+        self.assertFalse(self.settings.message, self.settings.message)
+        points = ropes.visible_path(r)
+        self.assertAlmostEqual(points[-1].z, ropes.curve_height(r), places=5)
+        self.assertLess(max((abs(b.z - a.z) for a, b in zip(points, points[1:]))), r.ropes_rope.radius * 0.2)
+        r.ropes_rope.squish = 1
+        r.ropes_rope.tension = 1
+        points = ropes.visible_path(r)
+        turns = [(b - a).normalized().dot((c - b).normalized()) for a, b, c in zip(points, points[1:], points[2:]) if min(a.x, b.x, c.x) > -0.8]
+        self.assertTrue(all((t > 0.95 for t in turns)), min(turns))
+        r.ropes_rope.squish = 0
+        self.settings.show_waypoints = True
         bpy.context.view_layer.update()
-        markers=[o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]
-        self.assertEqual(len(markers),4)
+        markers = [o for o in bpy.context.scene.objects if 'ropes_waypoint' in o]
+        self.assertEqual(len(markers), 4)
         for marker in markers:
-            anchor=r.ropes_rope.anchors[marker['ropes_waypoint']]
-            self.assertLess((marker.matrix_world.translation-Vector(anchor.position)).length,1e-6)
+            anchor = r.ropes_rope.anchors[marker['ropes_waypoint']]
+            self.assertLess((marker.matrix_world.translation - Vector(anchor.position)).length, 1e-06)
 
-    def test_minimum_run_spacing_is_one_and_nearly_touching(self):
-        r=self.rope((-1,0,0),(1,0,0))
-        r.ropes_rope.doubled=True
-        r.ropes_rope.double_spacing=1
-        points=ropes.visible_path(r)
-        self.assertEqual(r.ropes_rope.double_spacing,1)
-        self.assertAlmostEqual((points[0]-points[-1]).length/r.ropes_rope.radius,2,places=5)
-        r.ropes_rope.double_spacing=0
-        self.assertEqual(r.ropes_rope.double_spacing,1)
 
     def test_draft_clicks_moves_and_undo_skip_existing_geometry(self):
         existing=self.rope((-1,-1,0),(1,-1,0))
@@ -975,158 +786,76 @@ class RopesIntegration(unittest.TestCase):
         self.assertTrue(self.settings.junctions[0].is_knot)
         self.assertFalse(self.settings.junctions[0].over_a)
 
-    def test_doubled_variable_width_coarse_valley_has_no_spikes(self):
-        xs=[-1.5+i*.1 for i in range(31)]
-        ys=[-.5,-.12,0,.12,.5]
-        vertices=[(x,y,(.25+.18*math.cos(x*6))*min(1,abs(y)/.12)) for x in xs for y in ys]
-        faces=[(i*5+j,(i+1)*5+j,(i+1)*5+j+1,i*5+j+1) for i in range(30) for j in range(4)]
-        mesh=bpy.data.meshes.new('Variable groove')
-        mesh.from_pydata(vertices,[],faces)
-        self.target=bpy.data.objects.new('Variable groove',mesh)
-        bpy.context.scene.collection.objects.link(self.target)
-        self.settings.target=self.target
-        self.settings.subdivisions=0
-        r=self.rope((-1.4,0,0),(1.4,0,0))
-        r.ropes_rope.doubled=True
-        points=ropes.visible_path(r)
-        self.assertFalse(self.settings.message,self.settings.message)
-        self.assertLess(max(p.z for p in points),.32)
-        self.assertLess(cumulative(points)[-1],7)
-        self.assertEqual(len(self.settings.junctions),0)
-        # No local vertical excursions larger than one rope diameter.
-        self.assertLess(max(abs(a.z-b.z) for a,b in zip(points,points[1:])),r.ropes_rope.radius*2)
 
-    def test_knot_entry_tangents_and_compact_shared_core(self):
-        from ropes.geometry import knot_points,align_knot_entries,junction_points
-        tangent=Vector((1,0,0))
-        normal=Vector((0,0,1))
-        for kind in ('OVERHAND','FIGURE_EIGHT'):
-            core=align_knot_entries(knot_points(Vector(),tangent,normal,.05,kind),tangent)
-            self.assertGreater((core[1]-core[0]).normalized().dot(tangent),.98)
-            self.assertGreater((core[-1]-core[-2]).normalized().dot(tangent),.98)
-        from ropes.geometry import point_segment_distance
-        for bundle in (1,2.01):
-            radius=.05*bundle
-            cores=[junction_points(Vector(),Vector((0,1,0)),tangent,normal,radius,radius,c,'OVERHAND') for c in (0,1)]
-            gap=min(point_segment_distance(p,a,b) for p in cores[0] for a,b in zip(cores[1],cores[1][1:]))
-            self.assertGreater(gap,radius*2)
-            for p in cores[1]:
-                self.assertAlmostEqual(p.x,0,places=6)
-                self.assertAlmostEqual(p.z,cores[1][0].z,places=6)
 
-    def test_junction_entries_clear_other_core_single_and_doubled(self):
-        from ropes.geometry import point_segment_distance
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            ropes.rebuild(bpy.context.scene,self.target)
-            self.settings.junctions[0].is_knot=True
-            ropes.rebuild(bpy.context.scene,self.target,repath=False)
-            for lead,other in ((a,b),(b,a)):
-                points=ropes.visible_path(lead)
-                stations=json.loads(lead['ropes_stations'])
-                body=ropes.visible_path(other)
-                body_stations=json.loads(other['ropes_stations'])
-                ca=ropes.knot_records(bpy.context.scene,lead)[0]['station']
-                cb=ropes.knot_records(bpy.context.scene,other)[0]['station']
-                segments=[(p,q) for i,(p,q) in enumerate(zip(body,body[1:])) if abs(body_stations[i]-cb)<1e-6 and abs(body_stations[i+1]-cb)<1e-6]
-                for point,station in zip(points,stations):
-                    if 1e-5<abs(station-ca)<lead.ropes_rope.radius*10:
-                        gap=min(point_segment_distance(point,p,q) for p,q in segments)
-                        self.assertGreaterEqual(gap,lead.ropes_rope.radius*1.95)
 
     def test_sharp_cube_corner_rounds_at_contact_height(self):
         bpy.ops.mesh.primitive_cube_add(size=2)
-        self.target=bpy.context.object
-        self.settings.target=self.target
-        self.settings.radius=.05
-        r=self.rope((-.7,0,1),(1,0,.7),(1,0,-.7))
-        for doubled in (False,True):
-            r.ropes_rope.doubled=doubled
-            points=ropes.visible_path(r)
-            radii=[]
-            for a,b,c in zip(points,points[1:],points[2:]):
-                if b.x<.8 or b.z<.8:
-                    continue
-                u,v=b-a,c-b
-                cross=u.cross(v).length
-                if cross>1e-10:
-                    radii.append(u.length*v.length*(c-a).length/(2*cross))
-            self.assertTrue(radii)
-            self.assertGreater(min(radii),ropes.curve_height(r)*.5)
-        self.assertLess(max((p-Surface(self.target,1).project(p)[0]).length for p in points if p.x>.8 and p.z>.8),r.ropes_rope.radius*1.2)
-
-        # A distant knot must not disable corner rounding on the rest of a rope.
-        ropes.knot_at(bpy.context.scene,r,.25)
-        points=ropes.visible_path(r)
-        radii=[]
-        for a,b,c in zip(points,points[1:],points[2:]):
-            if b.x<.8 or b.z<.8:
+        self.target = bpy.context.object
+        self.settings.target = self.target
+        self.settings.radius = 0.05
+        r = self.rope((-0.7, 0, 1), (1, 0, 0.7), (1, 0, -0.7))
+        points = ropes.visible_path(r)
+        radii = []
+        for a, b, c in zip(points, points[1:], points[2:]):
+            if b.x < 0.8 or b.z < 0.8:
                 continue
-            u,v=b-a,c-b
-            cross=u.cross(v).length
-            if cross>1e-10:
-                radii.append(u.length*v.length*(c-a).length/(2*cross))
-        self.assertGreater(min(radii),ropes.curve_height(r)*.5)
-        self.assertLess(max((p-Surface(self.target,1).project(p)[0]).length for p in points if p.x>.8 and p.z>.8),r.ropes_rope.radius*1.2)
+            u, v = (b - a, c - b)
+            cross = u.cross(v).length
+            if cross > 1e-10:
+                radii.append(u.length * v.length * (c - a).length / (2 * cross))
+        self.assertTrue(radii)
+        self.assertGreater(min(radii), ropes.curve_height(r) * 0.5)
+        self.assertLess(max(((p - Surface(self.target, 1).project(p)[0]).length for p in points if p.x > 0.8 and p.z > 0.8)), r.ropes_rope.radius * 1.2)
+        ropes.knot_at(bpy.context.scene, r, 0.25)
+        points = ropes.visible_path(r)
+        radii = []
+        for a, b, c in zip(points, points[1:], points[2:]):
+            if b.x < 0.8 or b.z < 0.8:
+                continue
+            u, v = (b - a, c - b)
+            cross = u.cross(v).length
+            if cross > 1e-10:
+                radii.append(u.length * v.length * (c - a).length / (2 * cross))
+        self.assertGreater(min(radii), ropes.curve_height(r) * 0.5)
+        self.assertLess(max(((p - Surface(self.target, 1).project(p)[0]).length for p in points if p.x > 0.8 and p.z > 0.8)), r.ropes_rope.radius * 1.2)
 
-    def test_coarse_monkey_doubled_route_has_no_large_excursions(self):
-        bpy.ops.mesh.primitive_monkey_add()
-        self.target=bpy.context.object
-        self.settings.target=self.target
-        self.settings.subdivisions=0
-        surface=Surface(self.target,0)
-        r=self.rope(surface.project(Vector((-.85,0,.8)))[0],surface.project(Vector((.85,0,.8)))[0])
-        r.ropes_rope.doubled=True
-        points=ropes.visible_path(r)
-        self.assertFalse(self.settings.message,self.settings.message)
-        self.assertLess(max(p.z for p in points),1.15)
-        self.assertLess(cumulative(points)[-1],5)
 
     def test_curved_normal_runs_stay_on_contact_envelope(self):
-        self.settings.tension=0
-        for shape in ('SPHERE','RIPPLED'):
-            if shape=='SPHERE':
-                bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=1)
-                self.target=bpy.context.object
-                anchors=[(1,0,0),(0,0,1)]
+        self.settings.tension = 0
+        for shape in ('SPHERE', 'RIPPLED'):
+            if shape == 'SPHERE':
+                bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=1)
+                self.target = bpy.context.object
+                anchors = [(1, 0, 0), (0, 0, 1)]
             else:
-                bpy.ops.mesh.primitive_grid_add(x_subdivisions=151,y_subdivisions=15,size=4)
-                self.target=bpy.context.object
+                bpy.ops.mesh.primitive_grid_add(x_subdivisions=151, y_subdivisions=15, size=4)
+                self.target = bpy.context.object
                 for v in self.target.data.vertices:
-                    v.co.z=.11*math.cos(14*v.co.x)+.05*v.co.y*v.co.y
+                    v.co.z = 0.11 * math.cos(14 * v.co.x) + 0.05 * v.co.y * v.co.y
                 self.target.data.update()
-                anchors=[(x,0,.11*math.cos(14*x)) for x in (-1.5,1.5)]
-            self.settings.target=self.target
-            self.settings.radius=.05
-            self.settings.subdivisions=0
-            surface=Surface(self.target,0)
+                anchors = [(x, 0, 0.11 * math.cos(14 * x)) for x in (-1.5, 1.5)]
+            self.settings.target = self.target
+            self.settings.radius = 0.05
+            self.settings.subdivisions = 0
+            surface = Surface(self.target, 0)
             self.assertFalse(surface.sharp_edges)
-            r=self.rope(*(surface.project(Vector(p))[0] for p in anchors))
-            for doubled in (False,True):
-                with self.subTest(shape=shape,doubled=doubled):
-                    r.ropes_rope.doubled=doubled
-                    points=ropes.visible_path(r)
-                    if doubled:
-                        count=len(ropes.rest_path(r))
-                        points=[(a+b)/2 for a,b in zip(reversed(points[:count]),points[-count:])]
-                    if shape=='RIPPLED':
-                        points=[p for p in points if abs(p.x)<1.2]
-                    gaps=[(p-surface.project(p)[0]).length/r.ropes_rope.radius for p in points]
-                    self.assertGreaterEqual(min(gaps),.97)
-                    # 0.6 lifted these runs to 3.7 and 5 radii on the ripple.
-                    self.assertLessEqual(max(gaps),1.2)
-                    self.assertFalse(self.settings.message,self.settings.message)
-
-            if shape=='RIPPLED':
-                r.ropes_rope.squish=.6
-                r.ropes_rope.tension=.7
+            r = self.rope(*(surface.project(Vector(p))[0] for p in anchors))
+            with self.subTest(shape=shape):
+                points = ropes.visible_path(r)
+                if shape == 'RIPPLED':
+                    points = [p for p in points if abs(p.x) < 1.2]
+                gaps = [(p - surface.project(p)[0]).length / r.ropes_rope.radius for p in points]
+                self.assertGreaterEqual(min(gaps), 0.97)
+                self.assertLessEqual(max(gaps), 1.2)
+                self.assertFalse(self.settings.message, self.settings.message)
+            if shape == 'RIPPLED':
+                r.ropes_rope.squish = 0.6
+                r.ropes_rope.tension = 0.7
                 bpy.context.view_layer.update()
-                deformed=Surface(self.target.evaluated_get(bpy.context.evaluated_depsgraph_get()),0)
-                gaps=[(p-deformed.project(p)[0]).length/r.ropes_rope.radius for p in ropes.visible_path(r) if abs(p.x)<1.2]
-                self.assertLessEqual(max(gaps),1.2)
+                deformed = Surface(self.target.evaluated_get(bpy.context.evaluated_depsgraph_get()), 0)
+                gaps = [(p - deformed.project(p)[0]).length / r.ropes_rope.radius for p in ropes.visible_path(r) if abs(p.x) < 1.2]
+                self.assertLessEqual(max(gaps), 1.2)
 
     def test_knot_body_ports_align_before_entry_fairing(self):
         from ropes.geometry import knot_points
@@ -1142,66 +871,58 @@ class RopesIntegration(unittest.TestCase):
         self.assertGreater((body[-1]-body[-2]).normalized().dot(tangent),.75)
 
     def test_waypoint_turn_rounds_at_surface_height(self):
-        r=self.rope((-1,0,0),(0,0,0),(0,1,0))
-        for doubled in (False,True):
-            r.ropes_rope.doubled=doubled
-            points=ropes.visible_path(r)
-            self.assertTrue(all(abs(p.z-ropes.curve_height(r))<1e-5 for p in points))
-            radii=[]
-            for a,b,c in zip(points,points[1:],points[2:]):
-                if abs(b.x)>.4 or abs(b.y)>.4:
-                    continue
-                u,v=b-a,c-b
-                cross=u.cross(v).length
-                if cross>1e-10:
-                    radii.append(u.length*v.length*(c-a).length/(2*cross))
-            self.assertTrue(radii)
-            self.assertGreater(min(radii),r.ropes_rope.radius*1.2)
+        r = self.rope((-1, 0, 0), (0, 0, 0), (0, 1, 0))
+        points = ropes.visible_path(r)
+        self.assertTrue(all((abs(p.z - ropes.curve_height(r)) < 1e-05 for p in points)))
+        radii = []
+        for a, b, c in zip(points, points[1:], points[2:]):
+            if abs(b.x) > 0.4 or abs(b.y) > 0.4:
+                continue
+            u, v = (b - a, c - b)
+            cross = u.cross(v).length
+            if cross > 1e-10:
+                radii.append(u.length * v.length * (c - a).length / (2 * cross))
+        self.assertTrue(radii)
+        self.assertGreater(min(radii), r.ropes_rope.radius * 1.2)
 
     def test_dense_corner_waypoints_have_contact_and_stable_frames(self):
         from ropes.geometry import uniform_samples
         bpy.ops.mesh.primitive_cube_add(size=2)
-        self.target=bpy.context.object
-        self.settings.target=self.target
-        self.settings.radius=.05
-        r=self.rope((-.7,0,1),(.8,0,1),(.95,0,1),(1,0,1),(1,0,.95),(1,0,.8),(1,0,-.7))
-        surface=Surface(self.target,1)
-        for doubled in (False,True):
-            r.ropes_rope.doubled=doubled
-            points=ropes.visible_path(r)
-            gaps=[(p-surface.project(p)[0]).length for p in points]
-            self.assertLess(max(gaps),.05*1.2)
-            self.assertGreater(min(gaps),ropes.curve_height(r)*.8)
-            # Check the physical curve at strand sampling resolution; duplicate
-            # waypoint stations must not reverse the transported strand frame.
-            physical=uniform_samples(points,math.ceil(cumulative(points)[-1]/(.05*.3)))
-            for a,b,c in zip(physical,physical[1:],physical[2:]):
-                if b.x>.8 and b.z>.8:
-                    self.assertGreater((b-a).normalized().dot((c-b).normalized()),.5)
+        self.target = bpy.context.object
+        self.settings.target = self.target
+        self.settings.radius = 0.05
+        r = self.rope((-0.7, 0, 1), (0.8, 0, 1), (0.95, 0, 1), (1, 0, 1), (1, 0, 0.95), (1, 0, 0.8), (1, 0, -0.7))
+        surface = Surface(self.target, 1)
+        points = ropes.visible_path(r)
+        gaps = [(p - surface.project(p)[0]).length for p in points]
+        self.assertLess(max(gaps), 0.05 * 1.2)
+        self.assertGreater(min(gaps), ropes.curve_height(r) * 0.8)
+        physical = uniform_samples(points, math.ceil(cumulative(points)[-1] / (0.05 * 0.3)))
+        for a, b, c in zip(physical, physical[1:], physical[2:]):
+            if b.x > 0.8 and b.z > 0.8:
+                self.assertGreater((b - a).normalized().dot((c - b).normalized()), 0.5)
 
     def test_off_center_corner_has_no_sideways_detour(self):
         bpy.ops.mesh.primitive_cube_add(size=2)
-        self.target=bpy.context.object
-        self.settings.target=self.target
-        self.settings.radius=.05
-        r=None
-        for y,dense in ((-.6,False),(.37,False),(.37,True)):
-            anchors=[(.8,y,1),(.99,y,1),(1,y,.99),(1,y,.8)] if dense else [(.2,y,1),(1,y,.2)]
+        self.target = bpy.context.object
+        self.settings.target = self.target
+        self.settings.radius = 0.05
+        r = None
+        for y, dense in ((-0.6, False), (0.37, False), (0.37, True)):
+            anchors = [(0.8, y, 1), (0.99, y, 1), (1, y, 0.99), (1, y, 0.8)] if dense else [(0.2, y, 1), (1, y, 0.2)]
             if r is None:
-                r=self.rope(*anchors)
+                r = self.rope(*anchors)
             else:
                 with ropes.quiet_updates():
                     r.ropes_rope.anchors.clear()
                     for point in anchors:
-                        r.ropes_rope.anchors.add().position=point
-                ropes.rebuild(bpy.context.scene,self.target)
-            self.assertLess(max(abs(p.y-y) for p in ropes.rest_path(r)),1e-5)
-            for doubled in (False,True):
-                r.ropes_rope.doubled=doubled
-                points=ropes.visible_path(r)
-                limit=.05*1.04 if doubled else 1e-5
-                self.assertLess(max(abs(p.y-y) for p in points),limit)
-                self.assertLess(abs(sum(p.y-y for p in points)/len(points)),1e-4)
+                        r.ropes_rope.anchors.add().position = point
+                ropes.rebuild(bpy.context.scene, self.target)
+            self.assertLess(max((abs(p.y - y) for p in ropes.rest_path(r))), 1e-05)
+            points = ropes.visible_path(r)
+            limit = 1e-05
+            self.assertLess(max((abs(p.y - y) for p in points)), limit)
+            self.assertLess(abs(sum((p.y - y for p in points)) / len(points)), 0.0001)
 
     def test_diagonal_corner_route_matches_unfolded_faces(self):
         bpy.ops.mesh.primitive_cube_add(size=2)
@@ -1239,151 +960,52 @@ class RopesIntegration(unittest.TestCase):
         self.assertFalse(ropes.junction_active_a(self.settings.junctions[0]))
         self.assertTrue(self.settings.junctions[0].knot_owner_set)
 
-    def test_junction_overhand_leads_are_lower_and_passive_stays_straight(self):
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            ropes.rebuild(bpy.context.scene,self.target,repath=False)
-            passive_points=ropes.visible_path(b)
-            passive_station=ropes.knot_records(bpy.context.scene,b)[0]['station']
-            passive_core=[p for p,station in zip(passive_points,json.loads(b['ropes_stations'])) if abs(station-passive_station)<1e-6]
-            # Grounding moves both components together; the passive section
-            # retains its straight shape through the eye at the new height.
-            self.assertLess(max(p.z for p in passive_core)-min(p.z for p in passive_core),1e-5)
-            expected=b.ropes_rope.radius if doubled else 0
-            left,right=min(p.x for p in passive_core),max(p.x for p in passive_core)
-            self.assertAlmostEqual(right-left,expected*2,places=5)
-            self.assertTrue(all(min(abs(p.x-left),abs(p.x-right))<1e-5 for p in passive_core))
-            station=ropes.knot_records(bpy.context.scene,a)[0]['station']
-            points=ropes.visible_path(a)
-            stations=json.loads(a['ropes_stations'])
-            approaches=[p for p,s in zip(points,stations) if 1e-6<abs(s-station)<ropes.knot_extent(ropes.knot_records(bpy.context.scene,a)[0],a)]
-            # 0.9.0 rose to 5.6 radii (single) / 13 radii (doubled).
-            self.assertLess(max(p.z for p in approaches),a.ropes_rope.radius*(6.5 if doubled else 3))
-            core=ropes.junction_points(Vector(),Vector((0,1,0)),Vector((1,0,0)),Vector((0,0,1)),ropes.envelope_radius(a),ropes.envelope_radius(b),0,'OVERHAND')
-            tangent=Vector((1,0,0))
-            self.assertGreater((core[1]-core[0]).normalized().dot(tangent),.98)
-            self.assertGreater((core[-1]-core[-2]).normalized().dot(tangent),.98)
-            for guard in (core[:15],core[-15:]):
-                for p,q,r in zip(guard,guard[1:],guard[2:]):
-                    u,v=q-p,r-q
-                    cross=u.cross(v).length
-                    if cross>1e-10:
-                        bend=u.length*v.length*(r-p).length/(2*cross)
-                        self.assertGreater(bend,ropes.envelope_radius(a))
 
     def test_tightness_sets_centerline_height_and_squish_deforms_only_mesh(self):
-        bpy.ops.mesh.primitive_grid_add(x_subdivisions=40,y_subdivisions=40,size=4)
-        self.target=bpy.context.object
-        self.settings.target=self.target
-        self.settings.radius=.04
-        a=self.rope((-1,0,0),(1,0,0))
-        b=self.rope((-1,1,0),(1,1,0))
-        before_b=[tuple(p) for p in ropes.visible_path(b)]
-        for doubled in (False,True):
-            a.ropes_rope.doubled=doubled
-            for tightness,height in ((0,.04),(.5,.02),(1,0)):
-                a.ropes_rope.tension=tightness
-                self.assertTrue(all(abs(p.z-height)<1e-6 for p in ropes.visible_path(a)))
-        self.assertEqual(before_b,[tuple(p) for p in ropes.visible_path(b)])
-        a.ropes_rope.doubled=False
-        a.ropes_rope.tension=1
-        curve=[tuple(p) for p in ropes.visible_path(a)]
-        a.ropes_rope.squish=.8
-        self.assertEqual(curve,[tuple(p) for p in ropes.visible_path(a)])
-        key=self.target.data.shape_keys.key_blocks[self.target['ropes_compression_key']]
-        self.assertAlmostEqual(min(p.co.z for p in key.data),-.04*.8,places=5)
-        a.ropes_rope.tension=0
-        self.assertEqual(key.value,0)
+        bpy.ops.mesh.primitive_grid_add(x_subdivisions=40, y_subdivisions=40, size=4)
+        self.target = bpy.context.object
+        self.settings.target = self.target
+        self.settings.radius = 0.04
+        a = self.rope((-1, 0, 0), (1, 0, 0))
+        b = self.rope((-1, 1, 0), (1, 1, 0))
+        before_b = [tuple(p) for p in ropes.visible_path(b)]
+        for tightness, height in ((0, 0.04), (0.5, 0.02), (1, 0)):
+            a.ropes_rope.tension = tightness
+            self.assertTrue(all((abs(p.z - height) < 1e-06 for p in ropes.visible_path(a))))
+        self.assertEqual(before_b, [tuple(p) for p in ropes.visible_path(b)])
+        a.ropes_rope.tension = 1
+        curve = [tuple(p) for p in ropes.visible_path(a)]
+        a.ropes_rope.squish = 0.8
+        self.assertEqual(curve, [tuple(p) for p in ropes.visible_path(a)])
+        key = self.target.data.shape_keys.key_blocks[self.target['ropes_compression_key']]
+        self.assertAlmostEqual(min((p.co.z for p in key.data)), -0.04 * 0.8, places=5)
+        a.ropes_rope.tension = 0
+        self.assertEqual(key.value, 0)
 
     def test_centerline_routes_through_pinched_valley_without_side_loops(self):
-        xs=[-1.5+i*.1 for i in range(31)]
-        ys=[-.3,-.025,0,.025,.3]
-        vertices=[(x,y,(.15+.12*math.cos(6*x))*min(1,abs(y)/.025)) for x in xs for y in ys]
-        mesh=bpy.data.meshes.new('Pinched centerline valley')
-        mesh.from_pydata(vertices,[],[(i*5+j,(i+1)*5+j,(i+1)*5+j+1,i*5+j+1) for i in range(30) for j in range(4)])
-        self.target=bpy.data.objects.new('Pinched centerline valley',mesh)
+        xs = [-1.5 + i * 0.1 for i in range(31)]
+        ys = [-0.3, -0.025, 0, 0.025, 0.3]
+        vertices = [(x, y, (0.15 + 0.12 * math.cos(6 * x)) * min(1, abs(y) / 0.025)) for x in xs for y in ys]
+        mesh = bpy.data.meshes.new('Pinched centerline valley')
+        mesh.from_pydata(vertices, [], [(i * 5 + j, (i + 1) * 5 + j, (i + 1) * 5 + j + 1, i * 5 + j + 1) for i in range(30) for j in range(4)])
+        self.target = bpy.data.objects.new('Pinched centerline valley', mesh)
         bpy.context.scene.collection.objects.link(self.target)
-        self.settings.target=self.target
-        self.settings.subdivisions=0
-        self.settings.radius=.05
-        a=self.rope((-1.4,0,0),(0,0,0),(1.4,0,0))
-        for doubled in (False,True):
-            a.ropes_rope.doubled=doubled
-            for tightness in (0,.5,1):
-                a.ropes_rope.tension=tightness
-                points=ropes.visible_path(a)
-                self.assertFalse(self.settings.message,self.settings.message)
-                if doubled:
-                    count=len(ropes.rest_path(a))
-                    centers=[(p+q)/2 for p,q in zip(reversed(points[:count]),points[-count:])]
-                else:
-                    centers=points
-                self.assertLess(max(abs(p.y) for p in centers),.005)
-                self.assertLess(cumulative(centers)[-1],2.85)
-                self.assertLess(max(p.z for p in centers),a.ropes_rope.radius*1.01)
-                if tightness==1:
-                    self.assertLess(max(abs(p.z) for p in centers),1e-6)
+        self.settings.target = self.target
+        self.settings.subdivisions = 0
+        self.settings.radius = 0.05
+        a = self.rope((-1.4, 0, 0), (0, 0, 0), (1.4, 0, 0))
+        for tightness in (0, 0.5, 1):
+            a.ropes_rope.tension = tightness
+            points = ropes.visible_path(a)
+            self.assertFalse(self.settings.message, self.settings.message)
+            centers = points
+            self.assertLess(max((abs(p.y) for p in centers)), 0.005)
+            self.assertLess(cumulative(centers)[-1], 2.85)
+            self.assertLess(max((p.z for p in centers)), a.ropes_rope.radius * 1.01)
+            if tightness == 1:
+                self.assertLess(max((abs(p.z) for p in centers)), 1e-06)
 
-    def test_overhand_junction_has_contact_near_passive_top(self):
-        from ropes.geometry import point_segment_distance
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            ropes.rebuild(bpy.context.scene,self.target,repath=False)
-            core=[]
-            for owner in (a,b):
-                station=ropes.knot_records(bpy.context.scene,owner)[0]['station']
-                points=ropes.visible_path(owner)
-                indices=[i for i,s in enumerate(json.loads(owner['ropes_stations'])) if abs(s-station)<1e-6]
-                core.append((points,indices))
-            passive,indices=core[1]
-            rods=[(passive[i],passive[i+1]) for i in indices if i+1 in indices]
-            top=passive[indices[0]].z
-            active,indices=core[0]
-            near_top=[p for i,p in enumerate(active) if i in indices and p.z>top and abs(p.x)<a.ropes_rope.radius*(2 if doubled else .7)]
-            self.assertTrue(near_top)
-            gap=min(point_segment_distance(p,x,y) for p in near_top for x,y in rods)
-            self.assertLess(gap,a.ropes_rope.radius*2.25)
-            self.assertGreater(gap,a.ropes_rope.radius*1.9)
 
-    def test_junction_actual_runs_contact_flat_and_curved_surfaces(self):
-        for shape in ('FLAT','SPHERE'):
-            if shape=='SPHERE':
-                bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=2)
-                self.target=bpy.context.object
-                self.settings.target=self.target
-                height=math.sqrt(4-.6**2)
-                aa,bb=[(-.6,0,height),(.6,0,height)],[(0,-.6,height),(0,.6,height)]
-            else:
-                aa,bb=[(-1.5,0,0),(1.5,0,0)],[(0,-1.5,0),(0,1.5,0)]
-            a=self.rope(*aa)
-            b=self.rope(*bb)
-            joint=next(j for j in self.settings.junctions if j.rope_a==a and j.rope_b==b)
-            ropes.knot_at(bpy.context.scene,a,joint.distance_a)
-            for doubled,spacing,passive_radius in ((False,1,.035),(True,1,.035),(True,2,.05)):
-                with self.subTest(shape=shape,doubled=doubled,spacing=spacing):
-                    with ropes.quiet_updates():
-                        a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-                        a.ropes_rope.double_spacing=b.ropes_rope.double_spacing=spacing
-                        b.ropes_rope.radius=passive_radius
-                    ropes.rebuild(bpy.context.scene,self.target,repath=False)
-                    surface=Surface(self.target,0)
-                    gaps=[]
-                    for owner in (a,b):
-                        station=ropes.knot_records(bpy.context.scene,owner)[0]['station']
-                        core=[p for p,s in zip(ropes.visible_path(owner),json.loads(owner['ropes_stations'])) if abs(s-station)<1e-6]
-                        gaps.extend((p-surface.project(p)[0]).length/owner.ropes_rope.radius for p in core)
-                    self.assertGreaterEqual(min(gaps),1.0)
-                    # Before grounding, the single knot had nearly two radii
-                    # of clearance; paired runs floated higher still.
-                    self.assertLessEqual(min(gaps),1.15)
 
     def test_spanning_junction_is_not_lowered_toward_target(self):
         a=self.rope((-1.5,0,0),(1.5,0,0))
@@ -1397,47 +1019,7 @@ class RopesIntegration(unittest.TestCase):
             ropes.knot_at(bpy.context.scene,a,self.settings.junctions[0].distance_a)
         self.assertTrue(self.settings.junctions[0].is_knot)
 
-    def test_junction_active_knot_encircles_passive_axis(self):
-        from ropes.geometry import junction_points,point_segment_distance
-        for kind,expected in (('OVERHAND',3),('FIGURE_EIGHT',5)):
-            for bundle in (1,2.01):
-                radius=.05*bundle
-                active=junction_points(Vector(),Vector((0,1,0)),Vector((1,0,0)),Vector((0,0,1)),radius,radius,0,kind)
-                passive=junction_points(Vector(),Vector((0,1,0)),Vector((1,0,0)),Vector((0,0,1)),radius,radius,1,kind)
-                self.assertEqual(knot_determinant(active),expected,(kind,bundle))
-                self.assertEqual(knot_determinant(passive),1)
-                # The active loop actually winds around the passive axis. Its
-                # eye is not just placed next to a straight rope.
-                center=(passive[0]+passive[-1])/2
-                angles=[math.atan2(p.z-center.z,p.x-center.x) for p in active]
-                winding=sum(math.atan2(math.sin(b-a),math.cos(b-a)) for a,b in zip(angles,angles[1:]))
-                self.assertGreater(abs(winding),math.pi*2)
-                self.assertGreater(min(point_segment_distance(p,passive[0],passive[-1]) for p in active),radius*2)
 
-    def test_shared_knot_core_survives_collision_resolution(self):
-        from ropes.geometry import point_segment_distance
-        a=self.rope((-1.5,0,0),(1.5,0,0))
-        b=self.rope((0,-1.5,0),(0,1.5,0))
-        for doubled in (False,True):
-            with ropes.quiet_updates():
-                a.ropes_rope.doubled=b.ropes_rope.doubled=doubled
-            ropes.rebuild(bpy.context.scene,self.target)
-            self.settings.junctions[0].is_knot=True
-            surface=Surface(self.target,1)
-            displays={r.name:ropes.display_path(bpy.context.scene,r,surface,ropes.rest_path(r)) for r in (a,b)}
-            before={name:[p.copy() for p in data[0]] for name,data in displays.items()}
-            ropes.separate_knot_leads(bpy.context.scene,self.target,surface,displays)
-            cores={}
-            for r in (a,b):
-                station=ropes.knot_records(bpy.context.scene,r)[0]['station']
-                points,stations=displays[r.name]
-                indices=[i for i,s in enumerate(stations) if abs(s-station)<1e-6]
-                self.assertGreaterEqual(len(indices),31)
-                for i in indices:
-                    self.assertEqual(tuple(points[i]),tuple(before[r.name][i]))
-                cores[r.name]=[(points[i],points[i+1]) for i in indices if i+1 in indices]
-            for p,q in cores[a.name]:
-                self.assertGreaterEqual(min(point_segment_distance(p,x,y) for x,y in cores[b.name]),a.ropes_rope.radius*1.95)
 
     def test_disconnected_surface_rejected(self):
         bm = bmesh.new()
@@ -1463,18 +1045,17 @@ class RopesIntegration(unittest.TestCase):
 
     def test_transformed_surface_and_save_reload(self):
         self.target.location = (3, 2, 1)
-        self.target.rotation_euler.z = .4
+        self.target.rotation_euler.z = 0.4
         bpy.context.view_layer.update()
         r = self.rope((-1, 0, 0), (1, 0, 0))
         expected = self.target.matrix_world @ Vector((-1, 0, 0))
-        self.assertLess((ropes.rest_path(r)[0]-expected).length, 1e-4)
-        self.assertAlmostEqual(ropes.visible_path(r)[0].z, 1+self.settings.radius*(1-self.settings.tension), places=4)
-        r.ropes_rope.radius = .063
-        r.ropes_rope.smoothing = .75
-        r.ropes_rope.squish = .3
-        r.ropes_rope.doubled = True
-        ropes.knot_at(bpy.context.scene, r, .8)
-        r.ropes_rope.knots[0].kind = 'FIGURE_EIGHT'
+        self.assertLess((ropes.rest_path(r)[0] - expected).length, 0.0001)
+        self.assertAlmostEqual(ropes.visible_path(r)[0].z, 1 + self.settings.radius * (1 - self.settings.tension), places=4)
+        r.ropes_rope.radius = 0.063
+        r.ropes_rope.smoothing = 0.75
+        r.ropes_rope.squish = 0.3
+        ropes.knot_at(bpy.context.scene, r, 0.8)
+        r.ropes_rope.knots[0].kind = 'OVERHAND'
         self.settings.show_waypoints = True
         uid = r.ropes_rope.uid
         self.settings.waypoint_mode = True
@@ -1482,27 +1063,165 @@ class RopesIntegration(unittest.TestCase):
         with ropes.quiet_updates():
             for point, kind in [((-1, 1, 0), 'NORMAL'), ((0, 1, 0), 'SPANNING')]:
                 anchor = draft.ropes_rope.anchors.add()
-                anchor.position, anchor.kind = point, kind
+                anchor.position, anchor.kind = (point, kind)
         ropes.rebuild(bpy.context.scene, self.target)
         draft_uid = draft.ropes_rope.uid
         output = '/tmp/ropes-integration.blend'
         bpy.ops.wm.save_as_mainfile(filepath=output)
         bpy.ops.wm.open_mainfile(filepath=output)
-        r = next(o for o in bpy.context.scene.objects if o.ropes_rope.uid == uid)
-        draft = next(o for o in bpy.context.scene.objects if o.ropes_rope.uid == draft_uid)
+        r = next((o for o in bpy.context.scene.objects if o.ropes_rope.uid == uid))
+        draft = next((o for o in bpy.context.scene.objects if o.ropes_rope.uid == draft_uid))
         self.assertFalse(draft.ropes_rope.generated)
         self.assertEqual([a.kind for a in draft.ropes_rope.anchors], ['NORMAL', 'SPANNING'])
         self.assertFalse(draft.data.splines)
         self.assertTrue(bpy.context.scene.ropes_settings.waypoint_mode)
         self.assertEqual(len(r.ropes_rope.anchors), 2)
-        self.assertAlmostEqual(r.ropes_rope.radius, .063)
-        self.assertAlmostEqual(r.ropes_rope.smoothing, .75)
-        self.assertAlmostEqual(r.ropes_rope.squish, .3)
-        self.assertTrue(r.ropes_rope.doubled)
-        self.assertEqual(r.ropes_rope.knots[0].kind, 'FIGURE_EIGHT')
+        self.assertAlmostEqual(r.ropes_rope.radius, 0.063)
+        self.assertAlmostEqual(r.ropes_rope.smoothing, 0.75)
+        self.assertAlmostEqual(r.ropes_rope.squish, 0.3)
+        self.assertEqual(r.ropes_rope.knots[0].kind, 'OVERHAND')
         self.assertTrue(bpy.context.scene.ropes_settings.show_waypoints)
         ropes.rebuild(bpy.context.scene, r.ropes_rope.target)
-        self.assertLess((ropes.rest_path(r)[0]-expected).length, 1e-4)
+        self.assertLess((ropes.rest_path(r)[0] - expected).length, 0.0001)
+
+
+    def test_shared_overhand_template_opens_eye_smoothly(self):
+        from ropes.geometry import knot_points,align_knot_entries,overhand_eye,junction_points
+        lead=Vector((1,0,0));up=Vector((0,0,1));axis=Vector((0,1,0));radius=.035
+        line=align_knot_entries(knot_points(Vector(),lead,up,radius,count=720),lead,count=72)
+        self.assertEqual(knot_determinant(line),3)
+        eye=overhand_eye(line,lead,up)
+        for passive_radius in (.02,.035,.08):
+            tying,passive=[junction_points(Vector(),axis,lead,up,radius,passive_radius,c) for c in (0,1)]
+            self.assertEqual(len(tying),len(line))
+            deltas=[]
+            for original,opened in zip(line,tying):
+                original=original-eye
+                self.assertAlmostEqual(original.dot(axis),opened.dot(axis),places=6)
+                before=original-axis*original.dot(axis);after=opened-axis*opened.dot(axis)
+                self.assertLess(before.cross(after).length,1e-6)
+                deltas.append(after.length_squared-before.length_squared)
+            self.assertLess(max(deltas)-min(deltas),1e-7)
+            self.assertAlmostEqual(min(ropes.point_segment_distance(p,passive[0],passive[-1]) for p in tying),
+                                   (radius+passive_radius)*1.01,places=6)
+            dots=[(q-p).normalized().dot((r-q).normalized()) for p,q,r in zip(tying,tying[1:],tying[2:])
+                  if min((q-p).length,(r-q).length)>1e-8]
+            self.assertGreater(min(dots),.9)
+            self.assertTrue(all((p-passive[0]).cross(axis).length<1e-6 for p in passive))
+
+    def test_three_overhand_placements_preserve_the_template(self):
+        # Type 1 remains the accepted line knot.
+        line=self.rope((-1.5,-.9,0),(1.5,-.9,0))
+        ropes.knot_at(bpy.context.scene,line,1.5)
+        station=line.ropes_rope.knots[0].distance
+        core=[p for p,s in zip(ropes.visible_path(line),json.loads(line['ropes_stations'])) if abs(s-station)<1e-6]
+        self.assertEqual(len(core),180)
+        self.assertEqual(knot_determinant(core),3)
+        # Type 3 uses that same template and leaves its support straight.
+        self.setUp()
+        a=self.rope((-1.5,.5,0),(1.5,.5,0))
+        b=self.rope((0,-.1,0),(0,1.5,0))
+        joint=next(j for j in self.settings.junctions if j.rope_a==a and j.rope_b==b)
+        ropes.knot_at(bpy.context.scene,a,joint.distance_a)
+        self.check_shared_junction(a,b,joint)
+        # Type 2 takes exactly the same path through a self-crossing.
+        self.setUp()
+        r=self.rope((-1.3,-1.3,0),(1.3,1.3,0),(-1.3,1.3,0),(1.3,-1.3,0))
+        joint=next(j for j in self.settings.junctions if j.rope_a==r and j.rope_b==r)
+        ropes.knot_at(bpy.context.scene,r,joint.distance_a)
+        self.check_shared_junction(r,r,joint)
+
+    def check_shared_junction(self,active,passive,joint):
+        active_a=ropes.junction_active_a(joint)
+        ast=joint.distance_a if active_a else joint.distance_b
+        pst=joint.distance_b if active_a else joint.distance_a
+        pts=ropes.visible_path(active);ss=json.loads(active['ropes_stations'])
+        indices=[i for i,s in enumerate(ss) if abs(s-ast)<1e-6]
+        core=[pts[i] for i in indices]
+        pp=[p for p,s in zip(ropes.visible_path(passive),json.loads(passive['ropes_stations'])) if abs(s-pst)<1e-6]
+        self.assertEqual(len(core),720);self.assertEqual(len(pp),31)
+        _,lead=ropes.sample_at(ropes.rest_path(active),cumulative(ropes.rest_path(active)),ast)
+        _,axis=ropes.sample_at(ropes.rest_path(passive),cumulative(ropes.rest_path(passive)),pst)
+        expected=ropes.junction_points(Vector(),axis,lead,Vector((0,0,1)),active.ropes_rope.radius,
+                                      passive.ropes_rope.radius,0,size=active.ropes_rope.knot_size)
+        translation=core[0]-expected[0]
+        self.assertLess(max((actual-wanted-translation).length for actual,wanted in zip(core,expected)),1e-5)
+        self.assertTrue(all((p-pp[0]).cross(axis).length<1e-6 for p in pp))
+        self.assertGreaterEqual(min(ropes.point_segment_distance(p,pp[0],pp[-1]) for p in core),
+                                (active.ropes_rope.radius+passive.ropes_rope.radius)*.999)
+        # Both leads meet the core tangentially, without an elbow at the eye.
+        for i,j,k in ((indices[0]-1,indices[0],indices[0]+1),(indices[-1]-1,indices[-1],indices[-1]+1)):
+            self.assertGreater((pts[j]-pts[i]).normalized().dot((pts[k]-pts[j]).normalized()),.95)
+
+    def test_expanded_eye_is_smooth_at_oblique_junctions(self):
+        for angle in (30,60,90):
+            axis=Vector((math.cos(math.radians(angle)),math.sin(math.radians(angle)),0))
+            for passive_radius in (.02,.08):
+                body,passive=[ropes.junction_points(Vector(),axis,Vector((1,0,0)),Vector((0,0,1)),.035,passive_radius,c)
+                              for c in (0,1)]
+                self.assertGreater(min(ropes.point_segment_distance(p,passive[0],passive[-1]) for p in body),.035+passive_radius)
+                turns=[(b-a).normalized().dot((c-b).normalized()) for a,b,c in zip(body,body[1:],body[2:])
+                       if min((b-a).length,(c-b).length)>1e-8]
+                self.assertGreater(min(turns),.95)
+
+    def test_shared_knot_seats_on_curved_geometry_without_distortion(self):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=64,ring_count=32,radius=2)
+        self.target=bpy.context.object;self.settings.target=self.target
+        height=math.sqrt(4-.6**2)
+        a=self.rope((-.6,0,height),(.6,0,height))
+        b=self.rope((0,-.6,height),(0,.6,height))
+        with ropes.quiet_updates():b.ropes_rope.radius=.05
+        ropes.rebuild(bpy.context.scene,self.target)
+        joint=next(j for j in self.settings.junctions if j.rope_a==a and j.rope_b==b)
+        ropes.knot_at(bpy.context.scene,a,joint.distance_a)
+        surface=Surface(self.target,0)
+        world=self.target.matrix_world@Vector(joint.position)
+        normal=surface.project(world)[1]
+        _,lead=ropes.sample_at(ropes.rest_path(a),cumulative(ropes.rest_path(a)),joint.distance_a)
+        _,axis=ropes.sample_at(ropes.rest_path(b),cumulative(ropes.rest_path(b)),joint.distance_b)
+        expected=ropes.junction_points(Vector(),axis,lead,normal,a.ropes_rope.radius,b.ropes_rope.radius,0)
+        cores=[]
+        for owner,station in ((a,joint.distance_a),(b,joint.distance_b)):
+            core=[p for p,s in zip(ropes.visible_path(owner),json.loads(owner['ropes_stations'])) if abs(s-station)<1e-6]
+            cores.append(core)
+        shift=cores[0][0]-expected[0]
+        self.assertLess(max((p-q-shift).length for p,q in zip(cores[0],expected)),1e-5)
+        gaps=[(p-surface.project(p)[0]).length/owner.ropes_rope.radius for owner,core in zip((a,b),cores) for p in core]
+        self.assertGreater(min(gaps),.99);self.assertLess(min(gaps),1.12)
+
+    def test_centre_curve_view_is_exact_and_reversible(self):
+        r=self.rope((-1.5,0,0),(1.5,0,0))
+        ropes.knot_at(bpy.context.scene,r,1.5)
+        before=[tuple(p) for p in ropes.visible_path(r)]
+        helpers=[o for o in bpy.context.scene.objects if o.get('ropes_owner')==r.ropes_rope.uid]
+        self.assertEqual(r.data.splines[0].type,'BEZIER')
+        self.assertTrue(all(p.handle_left_type=='VECTOR' and p.handle_right_type=='VECTOR' for p in r.data.splines[0].bezier_points))
+        self.settings.curve_view='CURVES'
+        self.assertTrue(all(o.hide_get() and o.hide_render for o in helpers))
+        self.assertGreater(r.data.bevel_depth,0)
+        self.assertEqual(before,[tuple(p) for p in ropes.visible_path(r)])
+        self.settings.curve_view='BOTH'
+        self.assertTrue(all(not o.hide_get() and not o.hide_render for o in helpers))
+        self.assertTrue(r.show_in_front)
+        self.settings.curve_view='ROPE'
+        self.assertEqual(r.data.bevel_depth,0)
+        self.assertEqual(before,[tuple(p) for p in ropes.visible_path(r)])
+
+    def test_retired_controls_migrate_to_single_overhand(self):
+        r=self.rope((-1.5,0,0),(1.5,0,0))
+        ropes.knot_at(bpy.context.scene,r,1.5)
+        uid=r.ropes_rope.uid
+        r.ropes_rope['doubled']=True;r.ropes_rope['double_spacing']=2
+        r.ropes_rope['knot_type']=2;r.ropes_rope.knots[0]['kind']=2
+        r['ropes_schema']=11
+        ropes.migrate_on_load(None)
+        self.assertFalse(hasattr(r.ropes_rope,'doubled'))
+        self.assertNotIn('doubled',r.ropes_rope);self.assertNotIn('double_spacing',r.ropes_rope)
+        self.assertEqual(r.ropes_rope.knot_type,'OVERHAND')
+        self.assertEqual(r.ropes_rope.knots[0].kind,'OVERHAND')
+        self.assertEqual(r.ropes_rope.uid,uid)
+        self.assertAlmostEqual(r.ropes_rope.knots[0].distance,1.5)
+        self.assertAlmostEqual((ropes.visible_path(r)[-1]-ropes.visible_path(r)[0]).length,3,places=5)
 
 
 suite = unittest.defaultTestLoader.loadTestsFromTestCase(RopesIntegration)

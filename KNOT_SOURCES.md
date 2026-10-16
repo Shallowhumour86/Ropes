@@ -1,60 +1,32 @@
-# Knot geometry references
+# Overhand geometry reference
 
-The compact overhand and figure-eight styles use standard trefoil and figure-eight
-parameterizations, independently adapted into open centerlines with curved leads,
-rope thickness, surface clearance, and optional paired runs.
+Surface Ropes 0.12 uses one open overhand template for all placements. The
+line-knot parametrization is retained from the previous compact overhand:
 
-Version 0.10.0 fits the overhand eye around the passive cross-section rather
-than a uniformly enlarged torus. Its inner sections follow a close offset;
-additional radial room at active self-crossings preserves the over/under passes.
-Actual paired runs are checked against both passive runs and adjusted outward
-only where needed. The shared surface support translation is retained.
+- a(t) = (2 + cos(3t)) cos(2t)
+- b(t) = (2 + cos(3t)) sin(2t)
+- h(t) = 2.3 + 1.25 sin(3t)
 
-Version 0.9.2 adds a shared support translation after constructing both junction
-components. Sphere-traced clearance uses each actual rope run and its radius,
-including paired runs, to seat the knot against the base mesh. Both components
-move together; their relative eye geometry and knot topology remain intact.
-Junctions involving free spans skip this surface-placement step.
+The open interval, coordinate scaling, rigid attachment orientation and cubic
+leads turn this standard trefoil parametrization into the displayed overhand.
+The two projected crossings bound its central eye. At a junction, an axis
+through that eye carries the straight passive rope. Its radial opening uses
+r_new = sqrt(r² + delta), choosing delta so the minimum radius accommodates
+both rope radii. This monotone expansion preserves angular crossing order and
+axial depth. Surface seating is a shared translation, not a local knot solver.
 
-Version 0.9.1 turns compact-overhand junction bodies by a half-turn around the
-passive axis and reverses their traversal, placing both open attachments lower.
-Short attachment guards align with the tying rope's direction. The passive core
-and its approaches retain the 0.9.0 geometry; topology and clearance remain
-covered by the junction regression tests.
+The previous separate junction formulas, doubled runs, figure-eight and legacy
+style options have been removed. These are procedural visual curves rather than
+a physical tying simulation. No external dependency or mesh asset is bundled.
 
-Version 0.9 junctions use a single open parameterized overhand/figure-eight
-around the passive rope's axis. The passive section remains straight through
-its eye; clearance approaches allow the active rope to pass beneath it.
-The eye clears the passive bundle, and depth separates the active over/under
-passes. Tests check the active knot determinant and winding around that axis,
-together with an unknotted passive section. This replaces 0.8's paired knots.
+Reference inspected during the original implementation:
 
-Version 0.8 junction knots use two parallel components of the same open
-parameterized knot, with a transported cross-section frame. This replaces the
-independently cut torus-link loops from earlier versions. Both ropes traverse
-the selected overhand or figure-eight path; doubled bundles carry four runs.
-Their core paths remain fixed during the local lead-clearance correction.
-Regression tests verify the selected knot's determinant after an outside
-closure of its open ports (3 for overhand/trefoil, 5 for figure-eight).
-Version 0.7 selects better-aligned overhand attachment ports and rigidly rotates
-the knot body along its attachment chord before fairing the joins.
-Version 0.6 aligns attachment tangents and relaxes shared junction curves under
-local capsule-clearance and fairness constraints; this is a geometric visual
-model rather than a physical tying simulation.
-
-A freely available reference was inspected during implementation:
-
-- **pyknotid**, Alexander Taylor and other contributors, MIT licensed:
+- pyknotid, Alexander Taylor and contributors, MIT licensed:
   https://github.com/SPOCKnots/pyknotid
-- Named knot coordinate examples (`k3_1` / `trefoil` and `k4_1` / `figure_eight`):
+- Named trefoil coordinates, pinned source:
   https://github.com/SPOCKnots/pyknotid/blob/4d248ff32712702530e458b9dfa276038a5e61b2/pyknotid/make/named.py
-- License checked at the same commit:
+- License at the same commit:
   https://github.com/SPOCKnots/pyknotid/blob/4d248ff32712702530e458b9dfa276038a5e61b2/LICENSE.txt
-
-No pyknotid runtime dependency or external mesh asset is bundled. The add-on uses
-procedural geometric knot models. These are visual approximations, not simulated
-rope tying or physically tensioned knot meshes. The legacy trefoil remains an
-option for comparison. Attribution and the reference's MIT notice follow.
 
 Copyright 2018 Alexander Taylor and other contributors
 
