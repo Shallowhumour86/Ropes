@@ -1,4 +1,4 @@
-# Surface Ropes 0.10.0 — Blender 4.4
+# Surface Ropes 0.10.1 — Blender 4.4
 
 Draw ropes across a mesh, extend them, create over/under crossings and knots, and
 compress the underlying surface. Each rope has independent settings. Ropes use
@@ -7,7 +7,7 @@ are needed in Blender.
 
 ## Download and install
 
-[Download version 0.10.0](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.10.0.zip).
+[Download version 0.10.1](https://github.com/Shallowhumour86/Ropes/raw/refs/heads/main/dist/surface-ropes-0.10.1.zip).
 If the link opens a GitHub page, use **Download raw**; sign in if required.
 
 1. Save your scene. Disable the previous Surface Ropes version in Preferences.
@@ -23,7 +23,17 @@ add-on is enabled or the scene opens. Existing ropes retain edge routing until
 indentation. Choose Legacy Trefoil if you want to retain the previous knot style.
 Your first-version ZIP remains available in the repository.
 
-## New in 0.10.0
+## New in 0.10.1
+
+Ordinary crossings now use the sum of the actual rope radii for centre-curve
+separation, including doubled ropes, unequal widths and independent Tightness.
+Bundle width controls the horizontal transition footprint, without adding extra
+vertical clearance. Crossing detection also accounts for both rope radii.
+Install this update and click **Rebuild Ropes** to update existing crossings.
+
+[Crossing clearance preview](dist/surface-ropes-0.10.1-crossings.png)
+
+## Centreline routing introduced in 0.10.0
 
 - **Tightness now controls the normal surface route's centreline clearance**:
   **0** is one rope radius above the surface; **0.5** is half a radius;

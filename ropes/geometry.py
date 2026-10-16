@@ -348,14 +348,15 @@ def crossings(paths, radius):
         for name_b in names[na:]:
             pb = paths[name_b]
             radius = max(radii[name_a], radii[name_b])
+            clearance = radii[name_a]+radii[name_b]
             la, lb = lengths[name_a], lengths[name_b]
             for i, (a, b) in enumerate(zip(pa, pa[1:])):
                 for j, (c, d) in enumerate(zip(pb, pb[1:])):
                     if name_a == name_b and (j <= i or abs(la[i]-lb[j]) < radius*8):
                         continue
                     # Cheap bounding box rejection before the segment calculation.
-                    if any(max(a[k], b[k])+radius < min(c[k], d[k]) or
-                           max(c[k], d[k])+radius < min(a[k], b[k]) for k in range(3)):
+                    if any(max(a[k], b[k])+clearance < min(c[k], d[k]) or
+                           max(c[k], d[k])+clearance < min(a[k], b[k]) for k in range(3)):
                         continue
                     u, v = b-a, d-c
                     if u.length < 1e-9 or v.length < 1e-9:
@@ -363,7 +364,7 @@ def crossings(paths, radius):
                     if abs(u.normalized().dot(v.normalized())) > .94:
                         continue
                     x, y, s, t = closest_segments(a, b, c, d)
-                    if (x-y).length > radius:
+                    if (x-y).length > clearance:
                         continue
                     sa = la[i] + s*u.length
                     sb = lb[j] + t*v.length

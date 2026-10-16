@@ -166,3 +166,11 @@ underlying geometry and projected mouse math, rather than all UI behavior.
   oversized empty loop. Trace the passes and check the passive stays straight.
 - Check junction surface seating, lower entry curves, either tying-rope choice,
   self-crossings, figure-eight and individual knots, save/reopen, and undo/redo.
+
+## Crossing clearance (0.10.1)
+
+Cross two ropes with equal and unequal widths; test single/single, single/doubled,
+doubled/single and doubled/doubled. Swap over/under, change each rope's Tightness
+independently, then rebuild. The upper runs should touch the passive runs without
+an extra bundle-height gap. Repeat at a self-crossing and on a curved target.
+Existing doubled spacing and junction knots should retain their shape.

@@ -115,6 +115,46 @@ class RopesIntegration(unittest.TestCase):
         self.assertFalse(self.settings.junctions[0].is_knot)
         self.assertEqual(len(ropes.visible_path(b)), len(ropes.rest_path(b)))
 
+    def test_crossing_clearance_uses_actual_run_radii(self):
+        a=self.rope((-1.5,0,0),(1.5,0,0))
+        b=self.rope((0,-1.5,0),(0,1.5,0))
+        for doubled_a,doubled_b in ((False,False),(True,False),(False,True),(True,True)):
+            for reverse in (False,True):
+                with self.subTest(doubled_a=doubled_a,doubled_b=doubled_b,reverse=reverse):
+                    with ropes.quiet_updates():
+                        a.ropes_rope.radius=.025
+                        b.ropes_rope.radius=.06
+                        a.ropes_rope.tension=1
+                        b.ropes_rope.tension=0
+                        a.ropes_rope.doubled=doubled_a
+                        b.ropes_rope.doubled=doubled_b
+                        self.settings.junctions[0].over_a=not reverse
+                    ropes.rebuild(bpy.context.scene,self.target)
+                    pa,pb=ropes.visible_path(a),ropes.visible_path(b)
+                    gap=min((x-y).length for u,v in zip(pa,pa[1:]) for c,d in zip(pb,pb[1:])
+                            for x,y,_,_ in [closest_segments(u,v,c,d)])
+                    self.assertAlmostEqual(gap,.085,delta=.0001)
+                    passive=a if reverse else b
+                    height=ropes.curve_height(passive)
+                    self.assertLess(max(abs(p.z-height) for p in ropes.visible_path(passive)),1e-5)
+
+    def test_self_crossing_clearance_after_swap(self):
+        r=self.rope((-1.3,-1.3,0),(1.3,1.3,0),(-1.3,1.3,0),(1.3,-1.3,0))
+        for doubled in (False,True):
+            for over in (False,True):
+                with ropes.quiet_updates():
+                    r.ropes_rope.doubled=doubled
+                    self.settings.junctions[0].over_a=over
+                ropes.rebuild(bpy.context.scene,self.target)
+                joint=self.settings.junctions[0]
+                points=ropes.visible_path(r)
+                stations=json.loads(r['ropes_stations'])
+                aa=[i for i in range(len(points)-1) if abs(stations[i]-joint.distance_a)<.3]
+                bb=[i for i in range(len(points)-1) if abs(stations[i]-joint.distance_b)<.3]
+                gap=min((x-y).length for i in aa for j in bb
+                        for x,y,_,_ in [closest_segments(points[i],points[i+1],points[j],points[j+1])])
+                self.assertAlmostEqual(gap,2*r.ropes_rope.radius,delta=.0001)
+
     def test_manual_knots_and_extension_preserve_station(self):
         r = self.rope((-1.5, 0, 0), (1, 0, 0))
         ropes.knot_at(bpy.context.scene, r, .65)

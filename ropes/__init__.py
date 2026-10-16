@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'Surface Ropes',
     'author': 'Ropes contributors',
-    'version': (0, 10, 0),
+    'version': (0, 10, 1),
     'blender': (4, 4, 0),
     'location': '3D View > Sidebar > Ropes',
     'description': 'Draw surface ropes with editable waypoints, smooth junction knots and surface compression',
@@ -806,22 +806,7 @@ def fillet_surface_waypoints(rope,surface,points,stations,protected):
 def display_path(scene, rope, surface, path):
     radius = rope.ropes_rope.radius
     lengths = cumulative(path)
-    junctions = [j for j in scene.ropes_settings.junctions if
-                 (j.rope_a == rope and j.over_a) or (j.rope_b == rope and not j.over_a)]
-    rendered = []
-    base=baseline_path(rope,surface,path)
-    for index,(point, station) in enumerate(zip(path, lengths)):
-        _, normal, _ = surface.project(point)
-        lift = radius*1.05
-        for j in junctions:
-            if j.is_knot:
-                continue
-            distance = j.distance_a if j.over_a else j.distance_b
-            under = j.rope_b if j.over_a else j.rope_a
-            span = max(envelope_radius(rope), envelope_radius(under))*6
-            if abs(station-distance) < span:
-                lift += (envelope_radius(under)*2.1+radius*.1)*.5*(1+math.cos(math.pi*abs(station-distance)/span))
-        rendered.append(base[index]+normal*(lift-radius*1.05))
+    rendered=baseline_path(rope,surface,path)
     rendered, stations = insert_knots(scene, surface, path, lengths, rendered,
                                       knot_records(scene, rope), rope)
     records=knot_records(scene,rope)
@@ -932,10 +917,56 @@ def separate_knot_leads(scene,target,surface,displays):
             break
 
 
+def fit_crossing_curves(scene, surface, displays, paths):
+    """Fit overpasses to physical run curves, independent of bundle width/height."""
+    for joint in scene.ropes_settings.junctions:
+        if joint.is_knot:
+            continue
+        upper,lower=(joint.rope_a,joint.rope_b) if joint.over_a else (joint.rope_b,joint.rope_a)
+        if upper.name not in displays or lower.name not in displays:
+            continue
+        us,ls=(joint.distance_a,joint.distance_b) if joint.over_a else (joint.distance_b,joint.distance_a)
+        points,stations=displays[upper.name]
+        below,lower_stations=displays[lower.name]
+        goal=upper.ropes_rope.radius+lower.ropes_rope.radius
+        # Width determines the transition footprint, never vertical clearance.
+        span=max(envelope_radius(upper),envelope_radius(lower))*6
+        normal=surface.normal_at(sample_at(paths[upper.name],cumulative(paths[upper.name]),us)[0])
+        weights=[.5*(1+math.cos(math.pi*abs(s-us)/span)) if abs(s-us)<span else 0 for s in stations]
+        upper_segments=[i for i in range(len(points)-1) if weights[i]>0 or weights[i+1]>0]
+        lower_segments=[i for i in range(len(below)-1)
+                        if min(abs(lower_stations[i]-ls),abs(lower_stations[i+1]-ls))<span]
+        pairs=[(i,j) for i in upper_segments for j in lower_segments]
+        if not pairs:
+            continue
+        def clear(height):
+            lifted={i:points[i]+normal*(height*weights[i]) for i in set(k for a,b in pairs for k in (a,a+1))}
+            for i,j in pairs:
+                a,b,_,_=_geometry.closest_segments(lifted[i],lifted[i+1],below[j],below[j+1])
+                if (a-b).length<goal*(1+1e-5):
+                    return False
+            return True
+        if clear(0):
+            continue
+        lo,hi=0.0,goal
+        for _ in range(12):
+            if clear(hi):
+                break
+            hi*=2
+        else:
+            raise ValueError('Crossing cannot clear adjacent waypoints. Move the crossing farther from the rope end.')
+        for _ in range(20):
+            mid=(lo+hi)*.5
+            if clear(mid): hi=mid
+            else: lo=mid
+        displays[upper.name]=([p+normal*(hi*w) for p,w in zip(points,weights)],stations)
+
+
 def render_ropes(scene, target, surface, ropes, paths):
     settings = scene.ropes_settings
     displays = {rope.name: display_path(scene, rope, surface, paths[rope.name])
                 for rope in ropes if rope.name in paths}
+    fit_crossing_curves(scene,surface,displays,paths)
     separate_knot_leads(scene,target,surface,displays)
     pressure = PressureField(scene, target, surface, displays)
     helpers = {(o.get('ropes_owner'), o.get('ropes_strand')): o for o in scene.objects

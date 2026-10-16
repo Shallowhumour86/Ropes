@@ -1,3 +1,17 @@
+## 0.10.1
+
+- Fit ordinary overpasses against actual single or doubled run curves. Their
+  closest segment separation is the sum of the two rope radii, with only a
+  numerical tolerance. Account for independent widths and Tightness heights.
+- Keep bundle envelopes for horizontal crossing footprints and broad-phase
+  detection; remove their use as vertical overpass clearance.
+- Crossing detection now uses both ropes' radii rather than the larger one,
+  avoiding missed junctions between curves with different Tightness heights.
+- Audited doubled spacing, knot fitting, lead constraints and surface offsets:
+  doubled spacing is lateral; knot fitting and leads already use actual rope
+  radii. Their existing small collision margins and span safety are retained.
+- Existing scenes update through Rebuild Ropes; no saved settings are changed.
+
 ## 0.10.0
 
 - Changed Tightness to control normal centreline clearance: radius at 0, half
